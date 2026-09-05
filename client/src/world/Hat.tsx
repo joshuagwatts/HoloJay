@@ -27,11 +27,6 @@ function HatMesh({ hat, highlight }: { hat: HatDef; highlight?: boolean }) {
             <cylinderGeometry args={[0.22, 0.24, 0.4, 18]} />
             <meshStandardMaterial color={hat.color} roughness={0.4} />
           </mesh>
-          {/* Band: torus defaults to XY (vertical) — lay it flat around the crown */}
-          <mesh position={[0, 0.14, 0]} rotation={[Math.PI / 2, 0, 0]}>
-            <torusGeometry args={[0.235, 0.028, 10, 28]} />
-            <meshStandardMaterial color="#f4ecdc" metalness={0.15} roughness={0.45} />
-          </mesh>
         </group>
       );
     case "crown":
