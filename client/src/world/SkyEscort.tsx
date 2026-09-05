@@ -21,39 +21,55 @@ type LevelDef = {
   alienEvery: number;
 };
 
-const LEVELS: LevelDef[] = [
-  {
-    id: "ash-run",
-    name: "Ash Run",
-    startZ: 28,
-    endZ: -160,
-    halfW: 52,
-    tile: 5.5,
-    hull: 3,
-    driveSpeed: 20,
-    turnRate: 2.1,
-    meteorEvery: 0.85,
-    alienEvery: 1.25,
-  },
-  {
-    id: "glass-plain",
-    name: "Glass Plain",
-    startZ: 32,
-    endZ: -200,
-    halfW: 60,
-    tile: 5,
-    hull: 3,
-    driveSpeed: 23,
-    turnRate: 2.25,
-    meteorEvery: 0.62,
-    alienEvery: 0.95,
-  },
+const LEVEL_NAMES = [
+  "Dust Trail",
+  "Ash Run",
+  "Cinder Flats",
+  "Glass Plain",
+  "Scorch Reach",
+  "Breach Field",
+  "Ruin Expanse",
+  "Last Ridge",
 ];
+
+/** Endless escalating runs — index 0 is gentle, denser chaos as you push. */
+function makeLevel(n: number): LevelDef {
+  const t = Math.max(0, Math.floor(n));
+  const soft = Math.min(t, 24);
+  return {
+    id: `run-${t}`,
+    name: LEVEL_NAMES[t] ?? `Wave ${t + 1}`,
+    startZ: 22 + Math.min(soft, 10) * 1.5,
+    endZ: -(70 + soft * 36),
+    halfW: 46 + Math.min(soft, 14) * 2,
+    tile: 5,
+    hull: 3 + (soft >= 6 ? 1 : 0) + (soft >= 14 ? 1 : 0),
+    driveSpeed: 17 + Math.min(soft, 16) * 0.55,
+    turnRate: 2.05,
+    // Start sparse; ramp slowly. Level 0 ~3.4s between meteors.
+    meteorEvery: Math.max(0.32, 4.2 - soft * 0.18),
+    alienEvery: Math.max(0.55, 5.0 - soft * 0.2),
+  };
+}
+
+function levelIndexFromId(id: string | undefined): number {
+  if (!id) return 0;
+  const m = /^run-(\d+)$/.exec(id);
+  if (m) return parseInt(m[1], 10);
+  if (id === "ash-run") return 0;
+  if (id === "glass-plain") return 1;
+  return 0;
+}
+
+function terrainNoise(x: number, z: number): number {
+  const s = Math.sin(x * 0.21 + z * 0.17) * 43758.5453;
+  return s - Math.floor(s);
+}
 
 type Role = "driver" | "gunner";
 type Phase = "ready" | "run" | "won" | "dead";
 
-type Tile = { id: number; x: number; z: number; drop: number; gone: boolean };
+type Tile = { id: number; x: number; z: number; drop: number; gone: boolean; h: number; shade: number };
 type Meteor = { id: number; x: number; y: number; z: number; vx: number; vy: number; vz: number };
 type Alien = { id: number; x: number; y: number; z: number; hp: number };
 type Bullet = { id: number; x: number; y: number; z: number; dx: number; dy: number; dz: number };
@@ -128,7 +144,7 @@ export function SkyEscort({ color }: { color: string }) {
 
   const [levelIdx, setLevelIdx] = useState(0);
   const levelIdxRef = useRef(0);
-  const level = LEVELS[levelIdx] ?? LEVELS[0];
+  const level = makeLevel(levelIdx);
 
   const [phase, setPhase] = useState<Phase>("ready");
   const [seat, setSeat] = useState<Role>("driver");
@@ -181,17 +197,42 @@ export function SkyEscort({ color }: { color: string }) {
 
   const mats = useMemo(
     () => ({
-      dirt: new THREE.MeshStandardMaterial({
-        color: "#2a1c14",
-        emissive: "#3a2010",
-        emissiveIntensity: 0.25,
-        roughness: 0.95,
+      dirt: [
+        new THREE.MeshStandardMaterial({
+          color: "#3a2a1c",
+          emissive: "#1a1008",
+          emissiveIntensity: 0.12,
+          roughness: 0.98,
+          flatShading: true,
+        }),
+        new THREE.MeshStandardMaterial({
+          color: "#2e2418",
+          emissive: "#140e08",
+          emissiveIntensity: 0.1,
+          roughness: 1,
+          flatShading: true,
+        }),
+        new THREE.MeshStandardMaterial({
+          color: "#463522",
+          emissive: "#1c140a",
+          emissiveIntensity: 0.14,
+          roughness: 0.96,
+          flatShading: true,
+        }),
+      ],
+      rock: new THREE.MeshStandardMaterial({
+        color: "#4a4036",
+        emissive: "#1a1612",
+        emissiveIntensity: 0.08,
+        roughness: 0.92,
+        flatShading: true,
       }),
       dirtHot: new THREE.MeshStandardMaterial({
-        color: "#5a2810",
+        color: "#6a3010",
         emissive: color,
-        emissiveIntensity: 0.7,
-        roughness: 0.75,
+        emissiveIntensity: 0.85,
+        roughness: 0.7,
+        flatShading: true,
       }),
       meteor: new THREE.MeshStandardMaterial({ color: "#5c4030", emissive: "#ff6a00", emissiveIntensity: 1.3 }),
       alien: new THREE.MeshStandardMaterial({ color: "#1b5e20", emissive: "#69f0ae", emissiveIntensity: 1.4 }),
@@ -228,11 +269,11 @@ export function SkyEscort({ color }: { color: string }) {
   }
 
   function activeLevel() {
-    return LEVELS[levelIdxRef.current] ?? LEVELS[0];
+    return makeLevel(levelIdxRef.current);
   }
 
   function setLevel(idx: number) {
-    const next = Math.max(0, Math.min(LEVELS.length - 1, idx));
+    const next = Math.max(0, Math.floor(idx));
     levelIdxRef.current = next;
     setLevelIdx(next);
   }
@@ -243,7 +284,10 @@ export function SkyEscort({ color }: { color: string }) {
     let id = 1;
     for (let zz = L.startZ + L.tile; zz > L.endZ - L.tile * 2; zz -= L.tile) {
       for (let xx = -L.halfW; xx <= L.halfW; xx += L.tile) {
-        list.push({ id: id++, x: xx, z: zz, drop: 0, gone: false });
+        const n = terrainNoise(xx, zz);
+        const h = 0.15 + n * 0.7;
+        const shade = Math.floor(terrainNoise(xx + 9, zz - 4) * 4);
+        list.push({ id: id++, x: xx, z: zz, drop: 0, gone: false, h, shade });
       }
     }
     tiles.current = list;
@@ -286,7 +330,7 @@ export function SkyEscort({ color }: { color: string }) {
 
   function resetRun(asRole: Role, nextLevelIdx = levelIdxRef.current) {
     setLevel(nextLevelIdx);
-    const L = LEVELS[nextLevelIdx] ?? LEVELS[0];
+    const L = makeLevel(nextLevelIdx);
     seatRef.current = asRole;
     setSeat(asRole);
     driverIdRef.current = asRole === "driver" ? selfId : "ai";
@@ -310,8 +354,8 @@ export function SkyEscort({ color }: { color: string }) {
     aliens.current = [];
     bullets.current = [];
     blasts.current = [];
-    meteorAcc.current = 0;
-    alienAcc.current = 0;
+    meteorAcc.current = -Math.min(5, 2.5 + L.meteorEvery * 0.45);
+    alienAcc.current = -Math.min(6, 3 + L.alienEvery * 0.4);
     buildTerrain();
     shakeRef.current = 0;
     failCueT.current = 0;
@@ -379,10 +423,7 @@ export function SkyEscort({ color }: { color: string }) {
       if ((p === "dead" || p === "won") && (e.code === "Space" || e.code === "KeyR" || e.code === "Enter")) {
         e.preventDefault();
         if (!isHost) return;
-        const next =
-          p === "won" && levelIdxRef.current < LEVELS.length - 1
-            ? levelIdxRef.current + 1
-            : levelIdxRef.current;
+        const next = p === "won" ? levelIdxRef.current + 1 : levelIdxRef.current;
         resetRun(seatRef.current, next);
         emitMinigame(instanceId, "sky-escort", {
           type: "role",
@@ -457,8 +498,7 @@ export function SkyEscort({ color }: { color: string }) {
         driverIdRef.current = data.driverId;
         gunnerIdRef.current = data.gunnerId;
         if (data.levelId) {
-          const idx = LEVELS.findIndex((L) => L.id === data.levelId);
-          if (idx >= 0) setLevel(idx);
+          setLevel(levelIndexFromId(data.levelId));
         }
         if (data.driverId === selfId) pickSeat("driver");
         else if (data.gunnerId === selfId) pickSeat("gunner");
@@ -473,8 +513,7 @@ export function SkyEscort({ color }: { color: string }) {
       if (data.type === "input" && isHost) remoteInput.current = data;
       if (data.type === "snap" && !isHost) {
         if (data.levelId) {
-          const idx = LEVELS.findIndex((L) => L.id === data.levelId);
-          if (idx >= 0) setLevel(idx);
+          setLevel(levelIndexFromId(data.levelId));
         }
         phaseRef.current = data.phase;
         setPhase(data.phase);
@@ -484,7 +523,11 @@ export function SkyEscort({ color }: { color: string }) {
         z.current = data.z;
         y.current = data.y;
         yaw.current = data.yaw;
-        tiles.current = data.tiles;
+        tiles.current = data.tiles.map((t) => ({
+          ...t,
+          h: t.h ?? 0.35,
+          shade: t.shade ?? 0,
+        }));
         meteors.current = data.meteors;
         aliens.current = data.aliens;
         blasts.current = data.blasts;
@@ -585,7 +628,8 @@ export function SkyEscort({ color }: { color: string }) {
       }
 
       meteorAcc.current += clamped;
-      const meteorEvery = Math.max(0.28, level.meteorEvery - progress * 0.5);
+      // Soft mid-run ramp — early levels stay sparse.
+      const meteorEvery = Math.max(0.32, level.meteorEvery - progress * Math.min(0.55, 0.12 + levelIdxRef.current * 0.04));
       if (meteorAcc.current >= meteorEvery) {
         meteorAcc.current = 0;
         meteors.current.push({
@@ -781,12 +825,17 @@ export function SkyEscort({ color }: { color: string }) {
       tiles.current,
       (t, mesh) => {
         mesh.visible = !t.gone;
-        mesh.position.set(t.x, -t.drop, t.z);
-        mesh.rotation.z = t.drop > 0 ? t.drop * 0.07 * Math.sign(t.x || 1) : 0;
-        mesh.material = t.drop > 0 ? mats.dirtHot : mats.dirt;
-        mesh.scale.set(level.tile * 0.92, 0.35, level.tile * 0.92);
+        const thick = 0.55 + (t.h ?? 0.3);
+        // Full tile size with tiny overlap so slabs touch — no gaps.
+        mesh.scale.set(level.tile * 1.01, thick, level.tile * 1.01);
+        mesh.position.set(t.x, thick * 0.5 - t.drop, t.z);
+        mesh.rotation.z = t.drop > 0 ? t.drop * 0.05 * Math.sign(t.x || 1) : 0;
+        mesh.rotation.x = t.drop > 0 ? t.drop * 0.03 : (t.h ?? 0) * 0.04 - 0.02;
+        if (t.drop > 0) mesh.material = mats.dirtHot;
+        else if ((t.shade ?? 0) >= 3) mesh.material = mats.rock;
+        else mesh.material = mats.dirt[(t.shade ?? 0) % mats.dirt.length];
       },
-      () => new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mats.dirt),
+      () => new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mats.dirt[0]),
     );
 
     syncGroup(
@@ -956,7 +1005,7 @@ export function SkyEscort({ color }: { color: string }) {
                 </p>
                 <p className="sky-escort-hint">
                   {seat === "driver"
-                    ? "Finale run — WASD drive the buggy offroad across the collapsing plain to the gate"
+                    ? "Finale run — WASD drive the buggy across the plain; meteors punch holes in the ground"
                     : "Rear turret seat — click to aim, hold fire on dive-bombers"}
                 </p>
                 <div className="sky-escort-actions">
@@ -987,7 +1036,7 @@ export function SkyEscort({ color }: { color: string }) {
                   </button>
                 </div>
                 <p className="sky-escort-hint">
-                  Level {levelIdx + 1}/{LEVELS.length} · Space / Enter starts · Tab swaps seat · Return leaves
+                  Level {levelIdx + 1} · endless · Space / Enter starts · Tab swaps seat · Return leaves
                 </p>
               </>
             )}
@@ -1005,9 +1054,7 @@ export function SkyEscort({ color }: { color: string }) {
             )}
             {phase === "won" && (
               <p className="sky-escort-alert">
-                {levelIdx < LEVELS.length - 1
-                  ? `Gate secured — Space for ${LEVELS[levelIdx + 1]?.name ?? "next"}`
-                  : "Run complete — Space to replay"}
+                {`Gate secured — Space for ${makeLevel(levelIdx + 1).name}`}
               </p>
             )}
             {phase === "dead" && <p>Buggy cooked — Space to retry</p>}
