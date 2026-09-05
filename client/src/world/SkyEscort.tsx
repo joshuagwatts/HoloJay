@@ -25,10 +25,10 @@ const LEVELS: LevelDef[] = [
   {
     id: "ash-run",
     name: "Ash Run",
-    startZ: 18,
-    endZ: -95,
-    halfW: 28,
-    tile: 5,
+    startZ: 28,
+    endZ: -160,
+    halfW: 52,
+    tile: 5.5,
     hull: 3,
     driveSpeed: 20,
     turnRate: 2.1,
@@ -38,10 +38,10 @@ const LEVELS: LevelDef[] = [
   {
     id: "glass-plain",
     name: "Glass Plain",
-    startZ: 22,
-    endZ: -120,
-    halfW: 32,
-    tile: 4.5,
+    startZ: 32,
+    endZ: -200,
+    halfW: 60,
+    tile: 5,
     hull: 3,
     driveSpeed: 23,
     turnRate: 2.25,
@@ -274,7 +274,7 @@ export function SkyEscort({ color }: { color: string }) {
       );
     }
     camera.near = 0.1;
-    camera.far = 280;
+    camera.far = 420;
     camera.updateProjectionMatrix();
   }
 
@@ -552,26 +552,9 @@ export function SkyEscort({ color }: { color: string }) {
         x.current = THREE.MathUtils.clamp(x.current, -level.halfW + 2.5, level.halfW - 2.5);
       }
 
-      const aheadChance = 0.008 + progress * 0.03;
+      // Terrain only blows when meteors land — no random collapse.
       for (const t of tiles.current) {
         if (t.gone) continue;
-        const behind = t.z > z.current + 8;
-        const near = Math.hypot(t.x - x.current, t.z - z.current);
-        const ahead = t.z < z.current - 6 && t.z > z.current - 36;
-        if (behind && t.drop === 0 && Math.random() < 0.04 + progress * 0.09) {
-          t.drop = 0.01;
-          addBlast(t.x, 0.35, t.z);
-          shakeRef.current = Math.max(shakeRef.current, 0.32);
-          failCueT.current = 1.4;
-          setFailCue(true);
-        }
-        if (ahead && t.drop === 0 && near > 8 && Math.random() < aheadChance * 0.14) {
-          t.drop = 0.01;
-          addBlast(t.x, 0.35, t.z);
-          shakeRef.current = Math.max(shakeRef.current, 0.42);
-          failCueT.current = 1.6;
-          setFailCue(true);
-        }
         if (t.drop > 0) {
           t.drop += clamped * (2.1 + progress * 2.4);
           if (t.drop > 9) t.gone = true;
@@ -607,9 +590,9 @@ export function SkyEscort({ color }: { color: string }) {
         meteorAcc.current = 0;
         meteors.current.push({
           id: nextId.current++,
-          x: x.current + (Math.random() - 0.5) * 34,
+          x: x.current + (Math.random() - 0.5) * level.halfW * 1.6,
           y: 15 + Math.random() * 10,
-          z: z.current - 8 - Math.random() * 36,
+          z: z.current - 8 - Math.random() * 48,
           vx: (Math.random() - 0.5) * 4,
           vy: -15 - progress * 12,
           vz: 2 + Math.random() * 5,
@@ -621,11 +604,15 @@ export function SkyEscort({ color }: { color: string }) {
         m.z += m.vz * clamped;
         if (m.y < 0.3) {
           addBlast(m.x, 0.45, m.z);
-          shakeRef.current = Math.max(shakeRef.current, 0.4);
-          const hit = tiles.current.find(
-            (t) => !t.gone && Math.abs(t.x - m.x) < level.tile * 0.7 && Math.abs(t.z - m.z) < level.tile * 0.7,
-          );
-          if (hit && hit.drop === 0) hit.drop = 0.01;
+          shakeRef.current = Math.max(shakeRef.current, 0.55);
+          failCueT.current = 1.4;
+          setFailCue(true);
+          // Crater: impact tile + neighbors
+          const craterR = level.tile * 1.15;
+          for (const t of tiles.current) {
+            if (t.gone || t.drop > 0) continue;
+            if (Math.hypot(t.x - m.x, t.z - m.z) < craterR) t.drop = 0.01;
+          }
           m.y = -99;
         }
         if (Math.hypot(m.x - x.current, m.z - z.current) < 1.7 && m.y < 2.3 && m.y > 0) {
@@ -641,9 +628,9 @@ export function SkyEscort({ color }: { color: string }) {
         alienAcc.current = 0;
         aliens.current.push({
           id: nextId.current++,
-          x: x.current + (Math.random() - 0.5) * 30,
+          x: x.current + (Math.random() - 0.5) * level.halfW * 1.2,
           y: 6 + Math.random() * 9,
-          z: z.current - 20 - Math.random() * 40,
+          z: z.current - 20 - Math.random() * 50,
           hp: 2,
         });
       }
@@ -877,7 +864,7 @@ export function SkyEscort({ color }: { color: string }) {
   return (
     <group>
       <color attach="background" args={["#120806"]} />
-      <fog attach="fog" args={["#120806", 40, 120]} />
+      <fog attach="fog" args={["#120806", 55, 200]} />
       <ambientLight intensity={0.34} />
       <directionalLight position={[12, 24, 6]} intensity={0.95} color="#ffcc80" />
       <pointLight position={[x.current, 7, z.current]} color="#ff6a00" intensity={26} distance={55} />
@@ -1010,9 +997,9 @@ export function SkyEscort({ color }: { color: string }) {
                   {seat === "driver" ? "DRIVER" : "GUNNER"} · hull {"♥".repeat(hull)}
                   {"♡".repeat(Math.max(0, level.hull - hull))} · {hudDist}m to gate
                 </p>
-                {failCue ? <p className="sky-escort-alert">GROUND BREAKING UP</p> : null}
+                {failCue ? <p className="sky-escort-alert">METEOR IMPACT</p> : null}
                 <p className="sky-escort-hint">
-                  {seat === "driver" ? "WASD trek · dodge voids & meteors" : "Mouse aim · click / Space fire"}
+                  {seat === "driver" ? "WASD trek · dodge meteor craters" : "Mouse aim · click / Space fire"}
                 </p>
               </>
             )}
