@@ -20,7 +20,7 @@ export const GAMES: GameDef[] = [
     id: "sky-escort",
     name: "Sky Escort",
     color: "#ff7043",
-    tagline: "Last road out — cover the run",
+    tagline: "Offroad trek A→B — driver + gunner",
     mode: "fun",
   },
 ];

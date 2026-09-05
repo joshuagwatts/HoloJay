@@ -5,20 +5,55 @@ import * as THREE from "three";
 import { emitMinigame, onMinigame } from "../net/session.ts";
 import { useGame } from "../state/store.ts";
 
-/** Wide collapsing plane — driver flies a craft across it, not lane-dodging. */
-const START_Z = 12;
-const END_Z = -110;
-const PLANE_HALF = 22;
-const TILE = 5;
-const HULL_MAX = 3;
-const TURRET: [number, number, number] = [0, 5.5, 18];
-const CRAFT_SPEED = 22;
-const CRAFT_STRAFE = 18;
+/** Halo-3-finale vibe: ground buggy trek A→B over a dying plain. Not a runner. Not a plane. */
+
+type LevelDef = {
+  id: string;
+  name: string;
+  startZ: number;
+  endZ: number;
+  halfW: number;
+  tile: number;
+  hull: number;
+  driveSpeed: number;
+  turnRate: number;
+  meteorEvery: number;
+  alienEvery: number;
+};
+
+const LEVELS: LevelDef[] = [
+  {
+    id: "ash-run",
+    name: "Ash Run",
+    startZ: 18,
+    endZ: -95,
+    halfW: 28,
+    tile: 5,
+    hull: 3,
+    driveSpeed: 20,
+    turnRate: 2.1,
+    meteorEvery: 0.85,
+    alienEvery: 1.25,
+  },
+  {
+    id: "glass-plain",
+    name: "Glass Plain",
+    startZ: 22,
+    endZ: -120,
+    halfW: 32,
+    tile: 4.5,
+    hull: 3,
+    driveSpeed: 23,
+    turnRate: 2.25,
+    meteorEvery: 0.62,
+    alienEvery: 0.95,
+  },
+];
 
 type Role = "driver" | "gunner";
 type Phase = "ready" | "run" | "won" | "dead";
 
-type Tile = { id: number; ix: number; iz: number; x: number; z: number; drop: number; gone: boolean };
+type Tile = { id: number; x: number; z: number; drop: number; gone: boolean };
 type Meteor = { id: number; x: number; y: number; z: number; vx: number; vy: number; vz: number };
 type Alien = { id: number; x: number; y: number; z: number; hp: number };
 type Bullet = { id: number; x: number; y: number; z: number; dx: number; dy: number; dz: number };
@@ -28,9 +63,10 @@ type Snap = {
   type: "snap";
   phase: Phase;
   hull: number;
-  craftX: number;
-  craftZ: number;
-  craftY: number;
+  x: number;
+  z: number;
+  y: number;
+  yaw: number;
   tiles: Tile[];
   meteors: Meteor[];
   aliens: Alien[];
@@ -38,15 +74,22 @@ type Snap = {
   shake: number;
   driverId: string | null;
   gunnerId: string | null;
+  levelId: string;
 };
 
-type RoleMsg = { type: "role"; driverId: string | null; gunnerId: string | null; phase?: Phase };
+type RoleMsg = {
+  type: "role";
+  driverId: string | null;
+  gunnerId: string | null;
+  phase?: Phase;
+  levelId?: string;
+};
+
 type InputMsg = {
   type: "input";
   role: Role;
-  /** Driver stick: forward (-1..1 toward gate), strafe (-1..1) */
-  forward?: number;
-  strafe?: number;
+  throttle?: number;
+  steer?: number;
   yaw?: number;
   pitch?: number;
   fire?: boolean;
@@ -55,6 +98,22 @@ type InputMsg = {
 function hostIdFromInstance(instanceId: string): string {
   if (instanceId.startsWith("local:")) return "local";
   return instanceId.split(":")[0] || "local";
+}
+
+function syncGroup<T>(
+  group: THREE.Group | null,
+  items: T[],
+  apply: (item: T, mesh: THREE.Mesh) => void,
+  make: () => THREE.Mesh,
+) {
+  if (!group) return;
+  while (group.children.length < items.length) group.add(make());
+  while (group.children.length > items.length) {
+    const last = group.children[group.children.length - 1] as THREE.Mesh;
+    group.remove(last);
+    last.geometry.dispose();
+  }
+  items.forEach((item, i) => apply(item, group.children[i] as THREE.Mesh));
 }
 
 export function SkyEscort({ color }: { color: string }) {
@@ -67,33 +126,39 @@ export function SkyEscort({ color }: { color: string }) {
   const instanceId = location.type === "game" ? location.instanceId : "local:sky-escort";
   const isHost = offline || hostIdFromInstance(instanceId) === selfId || instanceId.startsWith("local:");
 
+  const [levelIdx, setLevelIdx] = useState(0);
+  const levelIdxRef = useRef(0);
+  const level = LEVELS[levelIdx] ?? LEVELS[0];
+
   const [phase, setPhase] = useState<Phase>("ready");
   const [seat, setSeat] = useState<Role>("driver");
-  const [hull, setHull] = useState(HULL_MAX);
+  const [hull, setHull] = useState(level.hull);
   const [hudDist, setHudDist] = useState(0);
   const [failCue, setFailCue] = useState(false);
+  const failCueT = useRef(0);
 
   const phaseRef = useRef<Phase>("ready");
   const seatRef = useRef<Role>("driver");
-  const hullRef = useRef(HULL_MAX);
+  const hullRef = useRef(level.hull);
   const shakeRef = useRef(0);
   const hudAcc = useRef(0);
 
-  const craftX = useRef(0);
-  const craftZ = useRef(START_Z);
-  const craftY = useRef(1.4);
-  const craftYaw = useRef(0);
+  const x = useRef(0);
+  const z = useRef(level.startZ);
+  const y = useRef(0.85);
+  const yaw = useRef(Math.PI); // face toward -Z gate
+  const speed = useRef(0);
   const falling = useRef(false);
   const invuln = useRef(0);
 
-  const keys = useRef({ f: 0, s: 0 });
+  const keys = useRef({ throttle: 0, steer: 0 });
   const nextId = useRef(1);
   const meteorAcc = useRef(0);
   const alienAcc = useRef(0);
   const snapAcc = useRef(0);
   const gunSendAcc = useRef(0);
   const gunYaw = useRef(0);
-  const gunPitch = useRef(-0.2);
+  const gunPitch = useRef(-0.1);
   const fireHeld = useRef(false);
   const fireCd = useRef(0);
   const lookQ = useRef({ x: 0, y: 0 });
@@ -107,7 +172,7 @@ export function SkyEscort({ color }: { color: string }) {
   const bullets = useRef<Bullet[]>([]);
   const blasts = useRef<Blast[]>([]);
 
-  const craft = useRef<THREE.Group>(null);
+  const buggy = useRef<THREE.Group>(null);
   const tileGroup = useRef<THREE.Group>(null);
   const meteorGroup = useRef<THREE.Group>(null);
   const alienGroup = useRef<THREE.Group>(null);
@@ -116,13 +181,22 @@ export function SkyEscort({ color }: { color: string }) {
 
   const mats = useMemo(
     () => ({
-      road: new THREE.MeshStandardMaterial({ color: "#2a1c18", emissive: "#4a2010", emissiveIntensity: 0.3, roughness: 0.9 }),
-      roadHot: new THREE.MeshStandardMaterial({ color: "#5a2810", emissive: color, emissiveIntensity: 0.75, roughness: 0.7 }),
-      meteor: new THREE.MeshStandardMaterial({ color: "#5c4030", emissive: "#ff6a00", emissiveIntensity: 1.25 }),
+      dirt: new THREE.MeshStandardMaterial({
+        color: "#2a1c14",
+        emissive: "#3a2010",
+        emissiveIntensity: 0.25,
+        roughness: 0.95,
+      }),
+      dirtHot: new THREE.MeshStandardMaterial({
+        color: "#5a2810",
+        emissive: color,
+        emissiveIntensity: 0.7,
+        roughness: 0.75,
+      }),
+      meteor: new THREE.MeshStandardMaterial({ color: "#5c4030", emissive: "#ff6a00", emissiveIntensity: 1.3 }),
       alien: new THREE.MeshStandardMaterial({ color: "#1b5e20", emissive: "#69f0ae", emissiveIntensity: 1.4 }),
       bullet: new THREE.MeshBasicMaterial({ color: "#ffe082" }),
       blast: new THREE.MeshBasicMaterial({ color: "#ff9100", transparent: true, opacity: 0.7 }),
-      craft: new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 2.2 }),
     }),
     [color],
   );
@@ -132,35 +206,44 @@ export function SkyEscort({ color }: { color: string }) {
     setPhase(next);
   }
 
+  function addBlast(px: number, py: number, pz: number) {
+    blasts.current.push({ id: nextId.current++, x: px, y: py, z: pz, age: 0 });
+    if (blasts.current.length > 22) blasts.current.shift();
+  }
+
   function hurt(n = 1) {
     if (invuln.current > 0) return;
     hullRef.current = Math.max(0, hullRef.current - n);
     setHull(hullRef.current);
     invuln.current = 1.05;
-    shakeRef.current = Math.max(shakeRef.current, 0.5);
-    addBlast(craftX.current, craftY.current, craftZ.current);
+    shakeRef.current = Math.max(shakeRef.current, 0.55);
+    addBlast(x.current, y.current + 0.4, z.current);
     if (hullRef.current <= 0) setPhaseBoth("dead");
   }
 
-  function addBlast(x: number, y: number, z: number) {
-    blasts.current.push({ id: nextId.current++, x, y, z, age: 0 });
-    if (blasts.current.length > 20) blasts.current.shift();
+  function turretWorld() {
+    const ox = Math.sin(yaw.current) * -1.35;
+    const oz = Math.cos(yaw.current) * -1.35;
+    return { x: x.current + ox, y: y.current + 1.35, z: z.current + oz };
   }
 
-  function buildPlane() {
+  function activeLevel() {
+    return LEVELS[levelIdxRef.current] ?? LEVELS[0];
+  }
+
+  function setLevel(idx: number) {
+    const next = Math.max(0, Math.min(LEVELS.length - 1, idx));
+    levelIdxRef.current = next;
+    setLevelIdx(next);
+  }
+
+  function buildTerrain() {
+    const L = activeLevel();
     const list: Tile[] = [];
     let id = 1;
-    for (let z = START_Z + TILE; z > END_Z - TILE * 2; z -= TILE) {
-      for (let x = -PLANE_HALF; x <= PLANE_HALF; x += TILE) {
-        list.push({
-          id: id++,
-          ix: Math.round(x / TILE),
-          iz: Math.round(z / TILE),
-          x,
-          z,
-          drop: 0,
-          gone: false,
-        });
+    for (let zz = L.startZ + L.tile; zz > L.endZ - L.tile * 2; zz -= L.tile) {
+      for (let xx = -L.halfW; xx <= L.halfW; xx += L.tile) {
+        list.push({ id: id++, x: xx, z: zz, drop: 0, gone: false });
       }
     }
     tiles.current = list;
@@ -169,15 +252,29 @@ export function SkyEscort({ color }: { color: string }) {
   function snapSeatCam(role: Role) {
     if (role === "gunner") {
       gunYaw.current = 0;
-      gunPitch.current = -0.18;
-      camera.position.set(TURRET[0], TURRET[1] + 0.5, TURRET[2]);
-      camera.lookAt(0, 2, craftZ.current - 30);
+      gunPitch.current = -0.1;
+      const t = turretWorld();
+      camera.position.set(t.x, t.y + 0.35, t.z);
+      camera.lookAt(
+        x.current + Math.sin(yaw.current) * 20,
+        2,
+        z.current + Math.cos(yaw.current) * 20,
+      );
     } else {
-      camera.position.set(craftX.current, craftY.current + 5.5, craftZ.current + 14);
-      camera.lookAt(craftX.current, 1.2, craftZ.current - 18);
+      const back = 11;
+      camera.position.set(
+        x.current - Math.sin(yaw.current) * back,
+        y.current + 5.2,
+        z.current - Math.cos(yaw.current) * back,
+      );
+      camera.lookAt(
+        x.current + Math.sin(yaw.current) * 14,
+        1.0,
+        z.current + Math.cos(yaw.current) * 14,
+      );
     }
     camera.near = 0.1;
-    camera.far = 260;
+    camera.far = 280;
     camera.updateProjectionMatrix();
   }
 
@@ -187,7 +284,9 @@ export function SkyEscort({ color }: { color: string }) {
     snapSeatCam(role);
   }
 
-  function resetRun(asRole: Role) {
+  function resetRun(asRole: Role, nextLevelIdx = levelIdxRef.current) {
+    setLevel(nextLevelIdx);
+    const L = LEVELS[nextLevelIdx] ?? LEVELS[0];
     seatRef.current = asRole;
     setSeat(asRole);
     driverIdRef.current = asRole === "driver" ? selfId : "ai";
@@ -197,23 +296,25 @@ export function SkyEscort({ color }: { color: string }) {
       if (asRole === "driver") gunnerIdRef.current = peer.id;
       else driverIdRef.current = peer.id;
     }
-    craftX.current = 0;
-    craftZ.current = START_Z;
-    craftY.current = 1.4;
-    craftYaw.current = 0;
+    x.current = 0;
+    z.current = L.startZ;
+    y.current = 0.85;
+    yaw.current = Math.PI;
+    speed.current = 0;
     falling.current = false;
     invuln.current = 0;
-    hullRef.current = HULL_MAX;
-    setHull(HULL_MAX);
-    keys.current = { f: 0, s: 0 };
+    hullRef.current = L.hull;
+    setHull(L.hull);
+    keys.current = { throttle: 0, steer: 0 };
     meteors.current = [];
     aliens.current = [];
     bullets.current = [];
     blasts.current = [];
     meteorAcc.current = 0;
     alienAcc.current = 0;
-    buildPlane();
+    buildTerrain();
     shakeRef.current = 0;
+    failCueT.current = 0;
     setFailCue(false);
     snapSeatCam(asRole);
     setPhaseBoth("run");
@@ -221,7 +322,7 @@ export function SkyEscort({ color }: { color: string }) {
 
   useEffect(() => {
     document.exitPointerLock?.();
-    buildPlane();
+    buildTerrain();
     snapSeatCam("driver");
     return () => {
       document.exitPointerLock?.();
@@ -263,12 +364,13 @@ export function SkyEscort({ color }: { color: string }) {
           e.preventDefault();
           if (!isHost) return;
           const role = seatRef.current;
-          resetRun(role);
+          resetRun(role, levelIdxRef.current);
           emitMinigame(instanceId, "sky-escort", {
             type: "role",
             driverId: role === "driver" ? selfId : "ai",
-            gunnerId: role === "gunner" ? selfId : Object.values(players).find((x) => x.id !== selfId)?.id ?? "ai",
+            gunnerId: role === "gunner" ? selfId : Object.values(players).find((pl) => pl.id !== selfId)?.id ?? "ai",
             phase: "run",
+            levelId: activeLevel().id,
           } satisfies RoleMsg);
         }
         return;
@@ -276,29 +378,38 @@ export function SkyEscort({ color }: { color: string }) {
 
       if ((p === "dead" || p === "won") && (e.code === "Space" || e.code === "KeyR" || e.code === "Enter")) {
         e.preventDefault();
-        if (isHost) resetRun(seatRef.current);
+        if (!isHost) return;
+        const next =
+          p === "won" && levelIdxRef.current < LEVELS.length - 1
+            ? levelIdxRef.current + 1
+            : levelIdxRef.current;
+        resetRun(seatRef.current, next);
+        emitMinigame(instanceId, "sky-escort", {
+          type: "role",
+          driverId: driverIdRef.current,
+          gunnerId: gunnerIdRef.current,
+          phase: "run",
+          levelId: activeLevel().id,
+        } satisfies RoleMsg);
         return;
       }
 
       if (p !== "run") return;
-
       if (seatRef.current === "driver") {
-        if (e.code === "KeyW" || e.code === "ArrowUp") keys.current.f = 1;
-        if (e.code === "KeyS" || e.code === "ArrowDown") keys.current.f = -1;
-        if (e.code === "KeyA" || e.code === "ArrowLeft") keys.current.s = -1;
-        if (e.code === "KeyD" || e.code === "ArrowRight") keys.current.s = 1;
+        if (e.code === "KeyW" || e.code === "ArrowUp") keys.current.throttle = 1;
+        if (e.code === "KeyS" || e.code === "ArrowDown") keys.current.throttle = -1;
+        if (e.code === "KeyA" || e.code === "ArrowLeft") keys.current.steer = 1;
+        if (e.code === "KeyD" || e.code === "ArrowRight") keys.current.steer = -1;
       }
-      if (seatRef.current === "gunner" && (e.code === "Space" || e.code === "KeyF")) {
-        fireHeld.current = true;
-      }
+      if (seatRef.current === "gunner" && (e.code === "Space" || e.code === "KeyF")) fireHeld.current = true;
     };
 
     const up = (e: KeyboardEvent) => {
       if (e.code === "KeyW" || e.code === "ArrowUp" || e.code === "KeyS" || e.code === "ArrowDown") {
-        if (seatRef.current === "driver") keys.current.f = 0;
+        keys.current.throttle = 0;
       }
       if (e.code === "KeyA" || e.code === "ArrowLeft" || e.code === "KeyD" || e.code === "ArrowRight") {
-        if (seatRef.current === "driver") keys.current.s = 0;
+        keys.current.steer = 0;
       }
       if (e.code === "Space" || e.code === "KeyF") fireHeld.current = false;
     };
@@ -345,24 +456,34 @@ export function SkyEscort({ color }: { color: string }) {
       if (data.type === "role") {
         driverIdRef.current = data.driverId;
         gunnerIdRef.current = data.gunnerId;
+        if (data.levelId) {
+          const idx = LEVELS.findIndex((L) => L.id === data.levelId);
+          if (idx >= 0) setLevel(idx);
+        }
         if (data.driverId === selfId) pickSeat("driver");
         else if (data.gunnerId === selfId) pickSeat("gunner");
         if (data.phase === "run" && !isHost) {
-          buildPlane();
-          hullRef.current = HULL_MAX;
-          setHull(HULL_MAX);
+          const L = activeLevel();
+          buildTerrain();
+          hullRef.current = L.hull;
+          setHull(L.hull);
           setPhaseBoth("run");
         }
       }
       if (data.type === "input" && isHost) remoteInput.current = data;
       if (data.type === "snap" && !isHost) {
+        if (data.levelId) {
+          const idx = LEVELS.findIndex((L) => L.id === data.levelId);
+          if (idx >= 0) setLevel(idx);
+        }
         phaseRef.current = data.phase;
         setPhase(data.phase);
         hullRef.current = data.hull;
         setHull(data.hull);
-        craftX.current = data.craftX;
-        craftZ.current = data.craftZ;
-        craftY.current = data.craftY;
+        x.current = data.x;
+        z.current = data.z;
+        y.current = data.y;
+        yaw.current = data.yaw;
         tiles.current = data.tiles;
         meteors.current = data.meteors;
         aliens.current = data.aliens;
@@ -376,14 +497,19 @@ export function SkyEscort({ color }: { color: string }) {
 
   useFrame((_, dt) => {
     const clamped = Math.min(dt, 0.05);
-    const progress = Math.min(1, Math.max(0, (START_Z - craftZ.current) / (START_Z - END_Z)));
+    const level = activeLevel();
+    const progress = Math.min(1, Math.max(0, (level.startZ - z.current) / (level.startZ - level.endZ)));
     hudAcc.current += clamped;
     if (hudAcc.current > 0.12) {
       hudAcc.current = 0;
-      setHudDist(Math.max(0, Math.floor(craftZ.current - END_Z)));
+      setHudDist(Math.max(0, Math.floor(z.current - level.endZ)));
     }
 
-    // Send driver stick when we're the non-host driver
+    if (failCueT.current > 0) {
+      failCueT.current = Math.max(0, failCueT.current - clamped);
+      if (failCueT.current <= 0) setFailCue(false);
+    }
+
     if (phaseRef.current === "run" && seatRef.current === "driver" && !isHost) {
       snapAcc.current += clamped;
       if (snapAcc.current > 0.05) {
@@ -391,164 +517,163 @@ export function SkyEscort({ color }: { color: string }) {
         emitMinigame(instanceId, "sky-escort", {
           type: "input",
           role: "driver",
-          forward: keys.current.f,
-          strafe: keys.current.s,
+          throttle: keys.current.throttle,
+          steer: keys.current.steer,
         } satisfies InputMsg);
       }
     }
 
     if (phaseRef.current === "run" && isHost) {
-      let forward = keys.current.f;
-      let strafe = keys.current.s;
+      let throttle = keys.current.throttle;
+      let steer = keys.current.steer;
       const rin = remoteInput.current;
       if (driverIdRef.current !== selfId && rin?.role === "driver") {
-        if (typeof rin.forward === "number") forward = rin.forward;
-        if (typeof rin.strafe === "number") strafe = rin.strafe;
+        if (typeof rin.throttle === "number") throttle = rin.throttle;
+        if (typeof rin.steer === "number") steer = rin.steer;
       }
 
-      // AI pilot: push toward gate, dodge meteors loosely
       if (driverIdRef.current === "ai") {
-        forward = 0.85;
+        throttle = 0.9;
         const threat = meteors.current.find(
-          (m) => m.z < craftZ.current + 10 && m.z > craftZ.current - 4 && Math.abs(m.x - craftX.current) < 4,
+          (m) => m.z < z.current + 12 && m.z > z.current - 2 && Math.abs(m.x - x.current) < 5,
         );
-        if (threat) strafe = threat.x > craftX.current ? -1 : 1;
-        else strafe *= 0.9;
+        if (threat) steer = threat.x > x.current ? 1 : -1;
+        else steer = x.current > 4 ? 0.4 : x.current < -4 ? -0.4 : 0;
       }
 
-      // Free plane flight — always some cruise toward the gate, stick steers
-      const cruise = 0.55 + progress * 0.25;
-      const f = THREE.MathUtils.clamp(cruise + forward * 0.55, 0.2, 1.35);
       if (!falling.current) {
-        craftZ.current -= CRAFT_SPEED * f * clamped;
-        craftX.current += strafe * CRAFT_STRAFE * clamped;
-        craftX.current = THREE.MathUtils.clamp(craftX.current, -PLANE_HALF + 2, PLANE_HALF - 2);
-        craftYaw.current = THREE.MathUtils.damp(craftYaw.current, -strafe * 0.45, 8, clamped);
+        yaw.current += steer * level.turnRate * clamped * (0.55 + Math.min(1, Math.abs(speed.current) / 10));
+        const target = throttle * level.driveSpeed * (0.85 + progress * 0.35);
+        speed.current = THREE.MathUtils.damp(speed.current, target, 4.5, clamped);
+        const crawl = throttle === 0 ? level.driveSpeed * 0.22 : 0;
+        const v = speed.current + crawl;
+        x.current += Math.sin(yaw.current) * v * clamped;
+        z.current += Math.cos(yaw.current) * v * clamped;
+        x.current = THREE.MathUtils.clamp(x.current, -level.halfW + 2.5, level.halfW - 2.5);
       }
 
-      // Collapse chaos on the plane
-      const aheadChance = 0.01 + progress * 0.035;
+      const aheadChance = 0.008 + progress * 0.03;
       for (const t of tiles.current) {
         if (t.gone) continue;
-        const behind = t.z > craftZ.current + 6;
-        const nearAhead = t.z < craftZ.current - 4 && t.z > craftZ.current - 32;
-        if (behind && t.drop === 0 && Math.random() < 0.05 + progress * 0.1) {
+        const behind = t.z > z.current + 8;
+        const near = Math.hypot(t.x - x.current, t.z - z.current);
+        const ahead = t.z < z.current - 6 && t.z > z.current - 36;
+        if (behind && t.drop === 0 && Math.random() < 0.04 + progress * 0.09) {
           t.drop = 0.01;
-          addBlast(t.x, 0.4, t.z);
-          shakeRef.current = Math.max(shakeRef.current, 0.3);
+          addBlast(t.x, 0.35, t.z);
+          shakeRef.current = Math.max(shakeRef.current, 0.32);
+          failCueT.current = 1.4;
           setFailCue(true);
         }
-        if (nearAhead && t.drop === 0 && Math.random() < aheadChance * 0.12) {
-          // leave a path — don't collapse directly under craft as often
-          if (Math.hypot(t.x - craftX.current, t.z - craftZ.current) > 7) {
-            t.drop = 0.01;
-            addBlast(t.x, 0.4, t.z);
-            shakeRef.current = Math.max(shakeRef.current, 0.4);
-            setFailCue(true);
-          }
+        if (ahead && t.drop === 0 && near > 8 && Math.random() < aheadChance * 0.14) {
+          t.drop = 0.01;
+          addBlast(t.x, 0.35, t.z);
+          shakeRef.current = Math.max(shakeRef.current, 0.42);
+          failCueT.current = 1.6;
+          setFailCue(true);
         }
         if (t.drop > 0) {
-          t.drop += clamped * (2 + progress * 2.2);
+          t.drop += clamped * (2.1 + progress * 2.4);
           if (t.drop > 9) t.gone = true;
         }
       }
 
       const under = tiles.current.find(
-        (t) => !t.gone && Math.abs(t.x - craftX.current) < TILE * 0.55 && Math.abs(t.z - craftZ.current) < TILE * 0.55,
+        (t) =>
+          !t.gone &&
+          Math.abs(t.x - x.current) < level.tile * 0.55 &&
+          Math.abs(t.z - z.current) < level.tile * 0.55,
       );
-      if (!under || under.drop > 1.4) falling.current = true;
+      if (!under || under.drop > 1.35) falling.current = true;
       if (falling.current) {
-        craftY.current -= 12 * clamped;
-        if (craftY.current < -5) {
+        y.current -= 14 * clamped;
+        if (y.current < -4) {
           falling.current = false;
-          craftY.current = 1.4;
+          y.current = 0.85;
           hurt(1);
-          const solid = tiles.current.find(
-            (t) => !t.gone && t.drop < 0.2 && Math.abs(t.z - craftZ.current) < 14,
-          );
+          const solid = tiles.current.find((t) => !t.gone && t.drop < 0.2 && Math.abs(t.z - z.current) < 16);
           if (solid) {
-            craftX.current = solid.x;
-            craftZ.current = solid.z;
+            x.current = solid.x;
+            z.current = solid.z;
           }
         }
       } else {
-        craftY.current = THREE.MathUtils.damp(craftY.current, 1.4, 10, clamped);
+        y.current = THREE.MathUtils.damp(y.current, 0.85, 12, clamped);
       }
 
-      // Meteors across the plane
       meteorAcc.current += clamped;
-      const meteorEvery = Math.max(0.32, 1.0 - progress * 0.65);
+      const meteorEvery = Math.max(0.28, level.meteorEvery - progress * 0.5);
       if (meteorAcc.current >= meteorEvery) {
         meteorAcc.current = 0;
         meteors.current.push({
           id: nextId.current++,
-          x: craftX.current + (Math.random() - 0.5) * 28,
-          y: 16 + Math.random() * 8,
-          z: craftZ.current - 12 - Math.random() * 30,
-          vx: (Math.random() - 0.5) * 3,
-          vy: -16 - progress * 12,
-          vz: 3 + Math.random() * 5,
+          x: x.current + (Math.random() - 0.5) * 34,
+          y: 15 + Math.random() * 10,
+          z: z.current - 8 - Math.random() * 36,
+          vx: (Math.random() - 0.5) * 4,
+          vy: -15 - progress * 12,
+          vz: 2 + Math.random() * 5,
         });
       }
       for (const m of meteors.current) {
         m.x += m.vx * clamped;
         m.y += m.vy * clamped;
         m.z += m.vz * clamped;
-        if (m.y < 0.35) {
-          addBlast(m.x, 0.5, m.z);
-          shakeRef.current = Math.max(shakeRef.current, 0.38);
+        if (m.y < 0.3) {
+          addBlast(m.x, 0.45, m.z);
+          shakeRef.current = Math.max(shakeRef.current, 0.4);
           const hit = tiles.current.find(
-            (t) => !t.gone && Math.abs(t.x - m.x) < TILE * 0.7 && Math.abs(t.z - m.z) < TILE * 0.7,
+            (t) => !t.gone && Math.abs(t.x - m.x) < level.tile * 0.7 && Math.abs(t.z - m.z) < level.tile * 0.7,
           );
           if (hit && hit.drop === 0) hit.drop = 0.01;
           m.y = -99;
         }
-        if (Math.hypot(m.x - craftX.current, m.z - craftZ.current) < 1.6 && m.y < 2.4 && m.y > 0) {
+        if (Math.hypot(m.x - x.current, m.z - z.current) < 1.7 && m.y < 2.3 && m.y > 0) {
           hurt(1);
           m.y = -99;
-          addBlast(craftX.current, craftY.current, craftZ.current);
+          addBlast(x.current, y.current, z.current);
         }
       }
-      meteors.current = meteors.current.filter((m) => m.y > -20 && m.z < craftZ.current + 35);
+      meteors.current = meteors.current.filter((m) => m.y > -20 && m.z < z.current + 40);
 
-      // Aliens for the turret
       alienAcc.current += clamped;
-      if (alienAcc.current >= Math.max(0.5, 1.35 - progress * 0.8)) {
+      if (alienAcc.current >= Math.max(0.45, level.alienEvery - progress * 0.7)) {
         alienAcc.current = 0;
         aliens.current.push({
           id: nextId.current++,
-          x: (Math.random() - 0.5) * 36,
-          y: 7 + Math.random() * 10,
-          z: craftZ.current - 25 - Math.random() * 45,
+          x: x.current + (Math.random() - 0.5) * 30,
+          y: 6 + Math.random() * 9,
+          z: z.current - 20 - Math.random() * 40,
           hp: 2,
         });
       }
 
+      const turret = turretWorld();
       fireCd.current = Math.max(0, fireCd.current - clamped);
       const gunIsAi = gunnerIdRef.current === "ai";
 
       if (gunIsAi && aliens.current[0] && fireCd.current <= 0) {
         const t = aliens.current[0];
-        const dx = t.x - TURRET[0];
-        const dy = t.y - TURRET[1];
-        const dz = t.z - TURRET[2];
+        const dx = t.x - turret.x;
+        const dy = t.y - turret.y;
+        const dz = t.z - turret.z;
         const len = Math.hypot(dx, dy, dz) || 1;
         bullets.current.push({
           id: nextId.current++,
-          x: TURRET[0],
-          y: TURRET[1],
-          z: TURRET[2],
+          x: turret.x,
+          y: turret.y,
+          z: turret.z,
           dx: dx / len,
           dy: dy / len,
           dz: dz / len,
         });
-        fireCd.current = 0.28;
+        fireCd.current = 0.26;
       }
 
       if (!gunIsAi) {
         if (seatRef.current === "gunner") {
-          gunYaw.current -= lookQ.current.x * 0.0022;
-          gunPitch.current = Math.max(-1.1, Math.min(0.5, gunPitch.current - lookQ.current.y * 0.002));
+          gunYaw.current -= lookQ.current.x * 0.0024;
+          gunPitch.current = Math.max(-1.0, Math.min(0.55, gunPitch.current - lookQ.current.y * 0.002));
           lookQ.current.x *= 0.2;
           lookQ.current.y *= 0.2;
         }
@@ -558,26 +683,27 @@ export function SkyEscort({ color }: { color: string }) {
           if (rin.fire) fireHeld.current = true;
         }
         if (fireHeld.current && fireCd.current <= 0) {
-          const cy = Math.cos(gunYaw.current);
-          const sy = Math.sin(gunYaw.current);
+          const aimYaw = yaw.current + gunYaw.current;
+          const cy = Math.cos(aimYaw);
+          const sy = Math.sin(aimYaw);
           const cp = Math.cos(gunPitch.current);
           const sp = Math.sin(gunPitch.current);
           bullets.current.push({
             id: nextId.current++,
-            x: TURRET[0],
-            y: TURRET[1],
-            z: TURRET[2],
+            x: turret.x,
+            y: turret.y,
+            z: turret.z,
             dx: sy * cp,
             dy: sp,
-            dz: -cy * cp,
+            dz: cy * cp,
           });
-          fireCd.current = 0.15;
+          fireCd.current = 0.14;
         }
       }
 
       if (!gunIsAi && seatRef.current === "gunner" && !isHost) {
-        gunYaw.current -= lookQ.current.x * 0.0022;
-        gunPitch.current = Math.max(-1.1, Math.min(0.5, gunPitch.current - lookQ.current.y * 0.002));
+        gunYaw.current -= lookQ.current.x * 0.0024;
+        gunPitch.current = Math.max(-1.0, Math.min(0.55, gunPitch.current - lookQ.current.y * 0.002));
         lookQ.current.x *= 0.2;
         lookQ.current.y *= 0.2;
         gunSendAcc.current += clamped;
@@ -594,35 +720,35 @@ export function SkyEscort({ color }: { color: string }) {
       }
 
       for (const b of bullets.current) {
-        b.x += b.dx * 58 * clamped;
-        b.y += b.dy * 58 * clamped;
-        b.z += b.dz * 58 * clamped;
+        b.x += b.dx * 60 * clamped;
+        b.y += b.dy * 60 * clamped;
+        b.z += b.dz * 60 * clamped;
       }
       for (const a of aliens.current) {
-        a.x += (craftX.current - a.x) * 0.3 * clamped;
-        a.y += (2 - a.y) * 0.22 * clamped;
-        a.z += (craftZ.current - a.z) * 0.4 * clamped + 5 * clamped;
+        a.x += (x.current - a.x) * 0.32 * clamped;
+        a.y += (1.8 - a.y) * 0.24 * clamped;
+        a.z += (z.current - a.z) * 0.42 * clamped + 5 * clamped;
         for (const b of bullets.current) {
           if (Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) < 1.4) {
             a.hp -= 1;
-            b.z = 999;
+            b.z = 9999;
             addBlast(a.x, a.y, a.z);
           }
         }
-        if (Math.hypot(a.x - craftX.current, a.z - craftZ.current) < 1.8 && a.y < 2.8) {
+        if (Math.hypot(a.x - x.current, a.z - z.current) < 1.9 && a.y < 2.6) {
           hurt(1);
           a.hp = 0;
-          addBlast(craftX.current, craftY.current, craftZ.current);
+          addBlast(x.current, y.current, z.current);
         }
       }
-      aliens.current = aliens.current.filter((a) => a.hp > 0 && a.z < craftZ.current + 30);
-      bullets.current = bullets.current.filter((b) => b.z > END_Z - 20 && b.y > -5 && b.y < 45);
+      aliens.current = aliens.current.filter((a) => a.hp > 0 && a.z < z.current + 35);
+      bullets.current = bullets.current.filter((b) => b.z > level.endZ - 30 && b.y > -6 && b.y < 50);
 
       invuln.current = Math.max(0, invuln.current - clamped);
       for (const bl of blasts.current) bl.age += clamped;
       blasts.current = blasts.current.filter((b) => b.age < 0.55);
 
-      if (craftZ.current <= END_Z) setPhaseBoth("won");
+      if (z.current <= level.endZ) setPhaseBoth("won");
 
       snapAcc.current += clamped;
       if (!instanceId.startsWith("local:") && snapAcc.current >= 1 / 15) {
@@ -631,9 +757,10 @@ export function SkyEscort({ color }: { color: string }) {
           type: "snap",
           phase: phaseRef.current,
           hull: hullRef.current,
-          craftX: craftX.current,
-          craftZ: craftZ.current,
-          craftY: craftY.current,
+          x: x.current,
+          z: z.current,
+          y: y.current,
+          yaw: yaw.current,
           tiles: tiles.current.map((t) => ({ ...t })),
           meteors: meteors.current.map((m) => ({ ...m })),
           aliens: aliens.current.map((a) => ({ ...a })),
@@ -641,123 +768,134 @@ export function SkyEscort({ color }: { color: string }) {
           shake: shakeRef.current,
           driverId: driverIdRef.current,
           gunnerId: gunnerIdRef.current,
+          levelId: level.id,
         } satisfies Snap);
       }
       remoteInput.current = null;
     }
 
     if (phaseRef.current === "run" && !isHost && seatRef.current === "gunner") {
-      gunYaw.current -= lookQ.current.x * 0.0022;
-      gunPitch.current = Math.max(-1.1, Math.min(0.5, gunPitch.current - lookQ.current.y * 0.002));
+      gunYaw.current -= lookQ.current.x * 0.0024;
+      gunPitch.current = Math.max(-1.0, Math.min(0.55, gunPitch.current - lookQ.current.y * 0.002));
       lookQ.current.x *= 0.2;
       lookQ.current.y *= 0.2;
     }
 
     shakeRef.current = Math.max(0, shakeRef.current - clamped * 1.5);
 
-    if (craft.current) {
-      craft.current.position.set(craftX.current, Math.max(craftY.current, -3), craftZ.current);
-      craft.current.rotation.y = craftYaw.current;
-      craft.current.rotation.z = craftYaw.current * 0.65;
+    if (buggy.current) {
+      buggy.current.position.set(x.current, Math.max(y.current, -3), z.current);
+      buggy.current.rotation.y = yaw.current;
+      buggy.current.rotation.z = keys.current.steer * -0.12;
     }
 
-    syncGroup(tileGroup.current, tiles.current, (t, mesh) => {
-      mesh.visible = !t.gone;
-      mesh.position.set(t.x, -t.drop, t.z);
-      mesh.rotation.z = t.drop > 0 ? t.drop * 0.08 * Math.sign(t.x || 1) : 0;
-      mesh.material = t.drop > 0 ? mats.roadHot : mats.road;
-      mesh.scale.set(TILE * 0.92, 0.32, TILE * 0.92);
-    }, () => new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mats.road));
+    syncGroup(
+      tileGroup.current,
+      tiles.current,
+      (t, mesh) => {
+        mesh.visible = !t.gone;
+        mesh.position.set(t.x, -t.drop, t.z);
+        mesh.rotation.z = t.drop > 0 ? t.drop * 0.07 * Math.sign(t.x || 1) : 0;
+        mesh.material = t.drop > 0 ? mats.dirtHot : mats.dirt;
+        mesh.scale.set(level.tile * 0.92, 0.35, level.tile * 0.92);
+      },
+      () => new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mats.dirt),
+    );
 
-    syncGroup(meteorGroup.current, meteors.current, (m, mesh) => {
-      mesh.visible = m.y > -10;
-      mesh.position.set(m.x, m.y, m.z);
-      mesh.scale.setScalar(0.95);
-    }, () => new THREE.Mesh(new THREE.DodecahedronGeometry(0.55), mats.meteor));
+    syncGroup(
+      meteorGroup.current,
+      meteors.current,
+      (m, mesh) => {
+        mesh.visible = m.y > -10;
+        mesh.position.set(m.x, m.y, m.z);
+      },
+      () => new THREE.Mesh(new THREE.DodecahedronGeometry(0.55), mats.meteor),
+    );
 
-    syncGroup(alienGroup.current, aliens.current, (a, mesh) => {
-      mesh.visible = true;
-      mesh.position.set(a.x, a.y, a.z);
-      mesh.scale.set(1.3, 0.55, 1.7);
-    }, () => new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.4, 5), mats.alien));
+    syncGroup(
+      alienGroup.current,
+      aliens.current,
+      (a, mesh) => {
+        mesh.visible = true;
+        mesh.position.set(a.x, a.y, a.z);
+        mesh.scale.set(1.25, 0.5, 1.6);
+      },
+      () => new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.4, 5), mats.alien),
+    );
 
-    syncGroup(bulletGroup.current, bullets.current, (b, mesh) => {
-      mesh.visible = true;
-      mesh.position.set(b.x, b.y, b.z);
-    }, () => new THREE.Mesh(new THREE.SphereGeometry(0.12, 6, 6), mats.bullet));
+    syncGroup(
+      bulletGroup.current,
+      bullets.current,
+      (b, mesh) => {
+        mesh.visible = true;
+        mesh.position.set(b.x, b.y, b.z);
+      },
+      () => new THREE.Mesh(new THREE.SphereGeometry(0.12, 6, 6), mats.bullet),
+    );
 
-    syncGroup(blastGroup.current, blasts.current, (b, mesh) => {
-      mesh.visible = b.age < 0.55;
-      mesh.position.set(b.x, b.y, b.z);
-      mesh.scale.setScalar(0.4 + b.age * 6);
-      (mesh.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 0.75 - b.age * 1.4);
-    }, () => new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 8), mats.blast.clone()));
+    syncGroup(
+      blastGroup.current,
+      blasts.current,
+      (b, mesh) => {
+        mesh.visible = b.age < 0.55;
+        mesh.position.set(b.x, b.y, b.z);
+        mesh.scale.setScalar(0.4 + b.age * 6);
+        (mesh.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 0.75 - b.age * 1.4);
+      },
+      () => new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 8), mats.blast.clone()),
+    );
 
-    // Cameras — snap firm on ready, chase on run
     const sh = shakeRef.current;
     const ox = (Math.random() - 0.5) * sh;
     const oy = (Math.random() - 0.5) * sh;
     if (seatRef.current === "gunner" && phaseRef.current !== "ready") {
-      const cy = Math.cos(gunYaw.current);
-      const sy = Math.sin(gunYaw.current);
+      const t = turretWorld();
+      const aimYaw = yaw.current + gunYaw.current;
+      const cy = Math.cos(aimYaw);
+      const sy = Math.sin(aimYaw);
       const cp = Math.cos(gunPitch.current);
       const sp = Math.sin(gunPitch.current);
-      camera.position.set(TURRET[0] + ox * 0.25, TURRET[1] + 0.4 + oy * 0.25, TURRET[2]);
-      camera.lookAt(TURRET[0] + sy * cp * 24, TURRET[1] + sp * 24, TURRET[2] - cy * cp * 24);
+      camera.position.set(t.x + ox * 0.2, t.y + 0.4 + oy * 0.2, t.z);
+      camera.lookAt(t.x + sy * cp * 28, t.y + sp * 28, t.z + cy * cp * 28);
     } else {
-      const tx = craftX.current;
-      const ty = craftY.current + 5.2;
-      const tz = craftZ.current + 13;
+      const back = phaseRef.current === "ready" ? 14 : 11;
+      const tx = x.current - Math.sin(yaw.current) * back;
+      const ty = y.current + (phaseRef.current === "ready" ? 7 : 5.1);
+      const tz = z.current - Math.cos(yaw.current) * back;
       if (phaseRef.current === "ready") {
-        camera.position.set(tx, ty + 2, tz + 4);
-        camera.lookAt(tx, 1, craftZ.current - 20);
+        camera.position.set(tx, ty, tz);
+        camera.lookAt(x.current + Math.sin(yaw.current) * 18, 0.8, z.current + Math.cos(yaw.current) * 18);
       } else {
         camera.position.x = THREE.MathUtils.damp(camera.position.x, tx + ox, 7, clamped);
         camera.position.y = THREE.MathUtils.damp(camera.position.y, ty + oy, 7, clamped);
         camera.position.z = THREE.MathUtils.damp(camera.position.z, tz, 7, clamped);
-        camera.lookAt(craftX.current, 1.3, craftZ.current - 16);
+        camera.lookAt(x.current + Math.sin(yaw.current) * 12, 1.0, z.current + Math.cos(yaw.current) * 12);
       }
     }
   });
 
   return (
     <group>
-      <color attach="background" args={["#140806"]} />
-      <fog attach="fog" args={["#140806", 35, 110]} />
-      <ambientLight intensity={0.32} />
-      <directionalLight position={[10, 22, 8]} intensity={0.9} color="#ffcc80" />
-      <pointLight position={[craftX.current, 8, craftZ.current]} color="#ff6a00" intensity={28} distance={55} />
-      <pointLight position={TURRET} color={color} intensity={22} distance={45} />
+      <color attach="background" args={["#120806"]} />
+      <fog attach="fog" args={["#120806", 40, 120]} />
+      <ambientLight intensity={0.34} />
+      <directionalLight position={[12, 24, 6]} intensity={0.95} color="#ffcc80" />
+      <pointLight position={[x.current, 7, z.current]} color="#ff6a00" intensity={26} distance={55} />
 
-      {Array.from({ length: 28 }, (_, i) => (
-        <mesh key={i} position={[(i % 7) * 6 - 18, 1.5 + (i % 4), -i * 3.2]}>
+      {Array.from({ length: 30 }, (_, i) => (
+        <mesh key={i} position={[(i % 8) * 7 - 24, 1.2 + (i % 5), -i * 3.4]}>
           <sphereGeometry args={[0.05, 4, 4]} />
           <meshBasicMaterial color="#ffab40" />
         </mesh>
       ))}
 
-      <group position={TURRET}>
-        <mesh position={[0, -2, 0]}>
-          <cylinderGeometry args={[2.6, 3.1, 4, 8]} />
-          <meshStandardMaterial color="#3e2723" roughness={0.85} />
-        </mesh>
-        <mesh position={[0, 0.15, 0]}>
-          <boxGeometry args={[1.8, 0.55, 1.8]} />
-          <meshStandardMaterial color="#5d4037" metalness={0.45} />
-        </mesh>
-        <mesh position={[0, 0.5, -0.5]} rotation={[0.25, 0, 0]}>
-          <cylinderGeometry args={[0.14, 0.18, 2.1, 8]} />
-          <meshStandardMaterial color="#efebe9" metalness={0.65} />
-        </mesh>
-      </group>
-
-      <mesh position={[0, 3, START_Z + 3]}>
-        <boxGeometry args={[18, 6, 0.5]} />
-        <meshStandardMaterial color="#4e342e" emissive={color} emissiveIntensity={0.25} />
+      <mesh position={[0, 2.2, level.startZ + 4]}>
+        <boxGeometry args={[22, 5, 1.2]} />
+        <meshStandardMaterial color="#3e2723" emissive={color} emissiveIntensity={0.2} />
       </mesh>
-      <mesh position={[0, 3.5, END_Z - 1]}>
-        <boxGeometry args={[20, 7, 0.6]} />
-        <meshStandardMaterial color="#ffe082" emissive="#ffd54f" emissiveIntensity={1.15} />
+      <mesh position={[0, 3.2, level.endZ - 1]}>
+        <boxGeometry args={[18, 7, 0.8]} />
+        <meshStandardMaterial color="#ffe082" emissive="#ffd54f" emissiveIntensity={1.2} />
       </mesh>
 
       <group ref={tileGroup} />
@@ -766,49 +904,77 @@ export function SkyEscort({ color }: { color: string }) {
       <group ref={bulletGroup} />
       <group ref={blastGroup} />
 
-      <group ref={craft} position={[0, 1.4, START_Z]}>
-        {/* Wide plane / hauler silhouette */}
-        <mesh rotation={[0.05, 0, 0]}>
-          <boxGeometry args={[2.8, 0.35, 4.2]} />
-          <meshStandardMaterial color="#3e2723" metalness={0.35} roughness={0.55} />
+      <group ref={buggy} position={[0, 0.85, level.startZ]} rotation={[0, Math.PI, 0]}>
+        {/* chunky offroad buggy — ground trek, not a plane */}
+        <mesh position={[0, 0.4, 0]}>
+          <boxGeometry args={[2.55, 0.7, 4.2]} />
+          <meshStandardMaterial color="#2c2118" metalness={0.35} roughness={0.55} />
         </mesh>
-        <mesh position={[0, 0.35, -0.2]}>
-          <boxGeometry args={[1.2, 0.55, 2.2]} />
-          <meshStandardMaterial color={color} emissive={color} emissiveIntensity={1.6} />
+        <mesh position={[0, 0.95, 0.55]}>
+          <boxGeometry args={[1.7, 0.7, 1.9]} />
+          <meshStandardMaterial color={color} emissive={color} emissiveIntensity={1.35} />
         </mesh>
-        <mesh position={[-1.8, 0, 0.2]} rotation={[0, 0, 0.15]}>
-          <boxGeometry args={[1.6, 0.12, 1.1]} />
-          <meshStandardMaterial color="#5d4037" />
+        <mesh position={[0, 1.35, 0.2]}>
+          <boxGeometry args={[1.55, 0.12, 1.5]} />
+          <meshStandardMaterial color="#1a1410" metalness={0.6} roughness={0.4} />
         </mesh>
-        <mesh position={[1.8, 0, 0.2]} rotation={[0, 0, -0.15]}>
-          <boxGeometry args={[1.6, 0.12, 1.1]} />
-          <meshStandardMaterial color="#5d4037" />
+        {/* roll cage */}
+        <mesh position={[-0.7, 1.55, 0.1]}>
+          <boxGeometry args={[0.08, 0.9, 1.8]} />
+          <meshStandardMaterial color="#4e342e" metalness={0.5} />
         </mesh>
-        <mesh position={[0, 0.15, 2.1]}>
-          <sphereGeometry args={[0.35, 12, 12]} />
+        <mesh position={[0.7, 1.55, 0.1]}>
+          <boxGeometry args={[0.08, 0.9, 1.8]} />
+          <meshStandardMaterial color="#4e342e" metalness={0.5} />
+        </mesh>
+        <mesh position={[0, 1.95, 0.1]}>
+          <boxGeometry args={[1.5, 0.08, 1.8]} />
+          <meshStandardMaterial color="#4e342e" metalness={0.5} />
+        </mesh>
+        {[
+          [-1.35, 0.15, 1.35],
+          [1.35, 0.15, 1.35],
+          [-1.35, 0.15, -1.35],
+          [1.35, 0.15, -1.35],
+        ].map((p, i) => (
+          <mesh key={i} position={p as [number, number, number]} rotation={[0, 0, Math.PI / 2]}>
+            <cylinderGeometry args={[0.55, 0.55, 0.42, 14]} />
+            <meshStandardMaterial color="#14100c" roughness={0.95} />
+          </mesh>
+        ))}
+        <mesh position={[0, 1.25, -1.55]}>
+          <cylinderGeometry args={[0.35, 0.42, 0.5, 8]} />
+          <meshStandardMaterial color="#5d4037" metalness={0.55} />
+        </mesh>
+        <mesh position={[0, 1.55, -1.75]} rotation={[0.35, 0, 0]}>
+          <cylinderGeometry args={[0.09, 0.12, 1.25, 8]} />
+          <meshStandardMaterial color="#efebe9" metalness={0.75} />
+        </mesh>
+        <mesh position={[0, 0.55, 2.05]}>
+          <sphereGeometry args={[0.3, 12, 12]} />
           <meshStandardMaterial color={color} emissive={color} emissiveIntensity={2.8} />
         </mesh>
-        <pointLight color={color} intensity={10} distance={14} />
+        <pointLight color={color} intensity={9} distance={12} />
       </group>
 
       <Html fullscreen style={{ pointerEvents: phase === "ready" ? "auto" : "none" }}>
         <div className="sky-escort-hud">
           <div className="sky-escort-card">
-            <em>last road out</em>
+            <em>{level.name}</em>
             <strong>Sky Escort</strong>
             {phase === "ready" && (
               <>
                 <p>
-                  You’re the <b>{seat === "driver" ? "PILOT" : "GUNNER"}</b>
+                  You’re the <b>{seat === "driver" ? "DRIVER" : "GUNNER"}</b>
                 </p>
                 <p className="sky-escort-hint">
                   {seat === "driver"
-                    ? "Fly the hauler across the collapsing plane — WASD steer · reach the far gate"
-                    : "Click to aim · hold fire on inbound ships while the plane falls apart"}
+                    ? "Finale run — WASD drive the buggy offroad across the collapsing plain to the gate"
+                    : "Rear turret seat — click to aim, hold fire on dive-bombers"}
                 </p>
                 <div className="sky-escort-actions">
                   <button type="button" className={seat === "driver" ? "on" : ""} onClick={() => pickSeat("driver")}>
-                    Pilot
+                    Driver
                   </button>
                   <button type="button" className={seat === "gunner" ? "on" : ""} onClick={() => pickSeat("gunner")}>
                     Gunner
@@ -819,55 +985,48 @@ export function SkyEscort({ color }: { color: string }) {
                     onClick={() => {
                       if (!isHost) return;
                       const role = seatRef.current;
-                      resetRun(role);
+                      resetRun(role, levelIdxRef.current);
                       emitMinigame(instanceId, "sky-escort", {
                         type: "role",
                         driverId: role === "driver" ? selfId : "ai",
                         gunnerId:
-                          role === "gunner" ? selfId : Object.values(players).find((x) => x.id !== selfId)?.id ?? "ai",
+                          role === "gunner" ? selfId : Object.values(players).find((pl) => pl.id !== selfId)?.id ?? "ai",
                         phase: "run",
+                        levelId: activeLevel().id,
                       } satisfies RoleMsg);
                     }}
                   >
-                    Launch
+                    Roll out
                   </button>
                 </div>
-                <p className="sky-escort-hint">Space / Enter also launches · Tab swaps seat · Return in HUD leaves</p>
+                <p className="sky-escort-hint">
+                  Level {levelIdx + 1}/{LEVELS.length} · Space / Enter starts · Tab swaps seat · Return leaves
+                </p>
               </>
             )}
             {phase === "run" && (
               <>
                 <p>
-                  {seat === "driver" ? "PILOT" : "GUNNER"} · hull {"♥".repeat(hull)}
-                  {"♡".repeat(Math.max(0, HULL_MAX - hull))} · {hudDist}m to gate
+                  {seat === "driver" ? "DRIVER" : "GUNNER"} · hull {"♥".repeat(hull)}
+                  {"♡".repeat(Math.max(0, level.hull - hull))} · {hudDist}m to gate
                 </p>
-                {failCue ? <p className="sky-escort-alert">PLANE BREAKING UP</p> : null}
+                {failCue ? <p className="sky-escort-alert">GROUND BREAKING UP</p> : null}
                 <p className="sky-escort-hint">
-                  {seat === "driver" ? "WASD fly the plane · dodge meteors & voids" : "Mouse aim · click / Space fire"}
+                  {seat === "driver" ? "WASD trek · dodge voids & meteors" : "Mouse aim · click / Space fire"}
                 </p>
               </>
             )}
-            {phase === "won" && <p className="sky-escort-alert">Gate reached — Space to run it back</p>}
-            {phase === "dead" && <p>Hauler down — Space to retry</p>}
+            {phase === "won" && (
+              <p className="sky-escort-alert">
+                {levelIdx < LEVELS.length - 1
+                  ? `Gate secured — Space for ${LEVELS[levelIdx + 1]?.name ?? "next"}`
+                  : "Run complete — Space to replay"}
+              </p>
+            )}
+            {phase === "dead" && <p>Buggy cooked — Space to retry</p>}
           </div>
         </div>
       </Html>
     </group>
   );
-}
-
-function syncGroup<T>(
-  group: THREE.Group | null,
-  items: T[],
-  apply: (item: T, mesh: THREE.Mesh) => void,
-  make: () => THREE.Mesh,
-) {
-  if (!group) return;
-  while (group.children.length < items.length) group.add(make());
-  while (group.children.length > items.length) {
-    const last = group.children[group.children.length - 1] as THREE.Mesh;
-    group.remove(last);
-    last.geometry.dispose();
-  }
-  items.forEach((item, i) => apply(item, group.children[i] as THREE.Mesh));
 }
