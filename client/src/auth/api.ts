@@ -45,14 +45,23 @@ function localToken(user: AuthUser): AuthResponse {
 }
 
 async function read<T>(res: Response): Promise<T> {
-  const data = (await res.json().catch(() => ({}))) as T & { message?: string };
+  const ct = res.headers.get("content-type") ?? "";
+  if (!ct.includes("application/json")) {
+    throw new Error("API unavailable");
+  }
+  const data = (await res.json().catch(() => ({}))) as T & { message?: string; token?: string; user?: unknown };
   if (!res.ok) throw new Error(data.message || "Request failed");
   return data;
 }
 
 async function tryRemote<T>(fn: () => Promise<T>): Promise<T | null> {
   try {
-    return await fn();
+    return await Promise.race([
+      fn(),
+      new Promise<null>((_, reject) => {
+        window.setTimeout(() => reject(new Error("API timeout")), 1800);
+      }),
+    ]);
   } catch {
     return null;
   }
@@ -76,7 +85,7 @@ export async function register(username: string, password: string, color: string
       body: JSON.stringify({ username, password, color }),
     }).then((res) => read<AuthResponse>(res)),
   );
-  if (remote) return remote;
+  if (remote?.token && remote.user) return remote;
 
   const name = username.trim();
   if (!USERNAME_RE.test(name)) throw new Error("Username must be 3-16 letters, numbers, or _");
@@ -97,7 +106,7 @@ export async function login(username: string, password: string): Promise<AuthRes
       body: JSON.stringify({ username, password }),
     }).then((res) => read<AuthResponse>(res)),
   );
-  if (remote) return remote;
+  if (remote?.token && remote.user) return remote;
 
   const row = loadUsers()[username.trim().toLowerCase()];
   if (!row || row.passHash !== (await sha256(password))) throw new Error("Wrong username or password");
@@ -112,7 +121,7 @@ export async function guest(username: string, color: string): Promise<AuthRespon
       body: JSON.stringify({ username, color }),
     }).then((res) => read<AuthResponse>(res)),
   );
-  if (remote) return remote;
+  if (remote?.token && remote.user) return remote;
   return localToken(localGuestUser(username, color));
 }
 

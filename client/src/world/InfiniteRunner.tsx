@@ -25,8 +25,8 @@ export function InfiniteRunner({ color }: { color: string }) {
   const [score, setScore] = useState(0);
   const [bestFlash, setBestFlash] = useState<number | null>(null);
   const phaseRef = useRef<Phase>("ready");
+  const camReady = useRef(false);
 
-  const lane = useRef(1);
   const targetLane = useRef(1);
   const x = useRef(0);
   const y = useRef(0.5);
@@ -40,12 +40,13 @@ export function InfiniteRunner({ color }: { color: string }) {
   const orb = useRef<THREE.Group>(null);
   const submitted = useRef(false);
   const scroll = useRef(0);
+  const scoreAcc = useRef(0);
 
   const mats = useMemo(
     () => ({
       block: new THREE.MeshStandardMaterial({ color: "#1a1220", emissive: color, emissiveIntensity: 0.55 }),
       bar: new THREE.MeshStandardMaterial({ color: "#2a1830", emissive: color, emissiveIntensity: 0.85 }),
-      lane: new THREE.MeshStandardMaterial({ color: "#120e18", emissive: "#22182c", emissiveIntensity: 0.35 }),
+      lane: new THREE.MeshStandardMaterial({ color: "#1a1424", emissive: "#3a2448", emissiveIntensity: 0.55 }),
     }),
     [color],
   );
@@ -56,7 +57,6 @@ export function InfiniteRunner({ color }: { color: string }) {
   }
 
   function resetRun() {
-    lane.current = 1;
     targetLane.current = 1;
     x.current = 0;
     y.current = 0.5;
@@ -71,6 +71,17 @@ export function InfiniteRunner({ color }: { color: string }) {
     setBestFlash(null);
     setPhaseBoth("run");
   }
+
+  // Snap camera into the track immediately — hub orbit left it miles away
+  useEffect(() => {
+    camera.position.set(0, 3.6, 8);
+    camera.near = 0.1;
+    camera.far = 120;
+    camera.lookAt(0, 1.1, -8);
+    camera.updateProjectionMatrix();
+    camReady.current = true;
+    document.exitPointerLock?.();
+  }, [camera]);
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -105,6 +116,7 @@ export function InfiniteRunner({ color }: { color: string }) {
   }, [color]);
 
   useFrame((_, dt) => {
+    if (!camReady.current) return;
     const clamped = Math.min(dt, 0.05);
     const targetX = LANES[targetLane.current];
     x.current += (targetX - x.current) * Math.min(1, 14 * clamped);
@@ -113,7 +125,11 @@ export function InfiniteRunner({ color }: { color: string }) {
       speed.current = Math.min(34, 14 + dist.current * 0.035);
       dist.current += speed.current * clamped;
       scroll.current += speed.current * clamped;
-      setScore(Math.floor(dist.current));
+      scoreAcc.current += clamped;
+      if (scoreAcc.current > 0.1) {
+        scoreAcc.current = 0;
+        setScore(Math.floor(dist.current));
+      }
 
       vy.current -= GRAVITY * clamped;
       y.current += vy.current * clamped;
@@ -152,10 +168,12 @@ export function InfiniteRunner({ color }: { color: string }) {
         if (!hitLane) continue;
         if (o.kind === "block" && py < 1.35) {
           setPhaseBoth("dead");
+          setScore(Math.floor(dist.current));
           break;
         }
         if (o.kind === "bar" && py > 0.85 && py < 2.1) {
           setPhaseBoth("dead");
+          setScore(Math.floor(dist.current));
           break;
         }
       }
@@ -163,40 +181,48 @@ export function InfiniteRunner({ color }: { color: string }) {
 
     if (orb.current) orb.current.position.set(x.current, y.current, 0);
 
-    camera.position.lerp(new THREE.Vector3(x.current * 0.35, 3.4 + y.current * 0.15, 7.5), 1 - Math.exp(-8 * clamped));
+    camera.position.x = THREE.MathUtils.damp(camera.position.x, x.current * 0.35, 8, clamped);
+    camera.position.y = THREE.MathUtils.damp(camera.position.y, 3.4 + y.current * 0.15, 8, clamped);
+    camera.position.z = THREE.MathUtils.damp(camera.position.z, 7.5, 8, clamped);
     camera.lookAt(x.current * 0.2, 1.1, -6);
   });
 
   useEffect(() => {
     if (phase !== "dead" || submitted.current || !user) return;
     submitted.current = true;
-    const entries = submitScore("lane-rush", user.username, score);
+    const entries = submitScore("lane-rush", user.username, Math.floor(dist.current));
     useGame.getState().setLeaderboard("lane-rush", entries);
-    if (entries[0] && entries[0].username === user.username && entries[0].score === Math.floor(score)) {
-      setBestFlash(score);
+    if (entries[0] && entries[0].username === user.username && entries[0].score === Math.floor(dist.current)) {
+      setBestFlash(Math.floor(dist.current));
     }
-  }, [phase, score, user]);
+  }, [phase, user]);
 
   const groundTiles = useMemo(() => Array.from({ length: 24 }, (_, i) => i), []);
 
   return (
     <group>
-      <color attach="background" args={["#0a0610"]} />
-      <fog attach="fog" args={["#0a0610", 18, 55]} />
-      <ambientLight intensity={0.35} />
-      <directionalLight position={[4, 10, 6]} intensity={0.85} color="#ffe6f5" />
-      <pointLight position={[0, 4, 2]} color={color} intensity={18} distance={30} />
+      <color attach="background" args={["#120818"]} />
+      <fog attach="fog" args={["#120818", 22, 60]} />
+      <ambientLight intensity={0.55} />
+      <directionalLight position={[4, 10, 6]} intensity={1.1} color="#ffe6f5" />
+      <pointLight position={[0, 4, 2]} color={color} intensity={22} distance={36} />
+
+      {/* Visible end-cap so the track never reads as an empty void */}
+      <mesh position={[0, 0, 2]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[7, 32]} />
+        <meshStandardMaterial color="#0d0a12" emissive={color} emissiveIntensity={0.08} />
+      </mesh>
 
       <ScrollingGround tiles={groundTiles} scroll={scroll} material={mats.lane} />
 
       {LANES.map((lx, i) => (
-        <mesh key={i} position={[lx, 0.02, -12]} rotation={[-Math.PI / 2, 0, 0]}>
-          <planeGeometry args={[0.08, 40]} />
-          <meshBasicMaterial color={color} transparent opacity={0.35} />
+        <mesh key={i} position={[lx, 0.03, -12]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[0.1, 44]} />
+          <meshBasicMaterial color={color} transparent opacity={0.55} />
         </mesh>
       ))}
 
-      <group ref={orb}>
+      <group ref={orb} position={[0, 0.5, 0]}>
         <mesh>
           <sphereGeometry args={[0.42, 28, 28]} />
           <meshStandardMaterial color={color} emissive={color} emissiveIntensity={2.8} />
@@ -206,12 +232,12 @@ export function InfiniteRunner({ color }: { color: string }) {
 
       <ObstacleSync obstacles={obstacles} lanes={LANES} mats={mats} />
 
-      <Html position={[0, 5.4, 0]} center style={{ pointerEvents: "none" }}>
+      <Html position={[0, 4.2, 0]} center style={{ pointerEvents: "none" }}>
         <div className="room-title">
           <em>infinite runner</em>
           <strong>Lane Rush</strong>
           <span>
-            {phase === "ready" && "A/D lanes · Space jump · Enter to start"}
+            {phase === "ready" && "A / D change lanes · Space jump · Enter to start"}
             {phase === "run" && `${score} m`}
             {phase === "dead" && `Crashed at ${score} m · Space to retry`}
           </span>

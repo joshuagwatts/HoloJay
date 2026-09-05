@@ -162,7 +162,7 @@ export const useGame = create<GameStore>((set, get) => ({
   setChat: (id, text, at) => set({ lastChat: { ...get().lastChat, [id]: { text, at } } }),
   setAssignments: (assignments) => set({ assignments, loopVisited: emptyLoop(), loopCount: get().loopCount + 1 }),
   setFavorites: (favorites) => set({ favorites }),
-  setLocation: (location) => set({ location, followInvite: null }),
+  setLocation: (location) => set({ location, followInvite: null, nearby: null, nearbyHat: null }),
   setFollowInvite: (followInvite) => set({ followInvite }),
   markCheckpoint: (index) => {
     const loopVisited = get().loopVisited.slice();

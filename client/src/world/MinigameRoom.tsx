@@ -3,7 +3,6 @@ import { useEffect } from "react";
 import { useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { gameById } from "@holojay/shared";
-import { emitLeave } from "../net/session.ts";
 import { useGame } from "../state/store.ts";
 import { Portal } from "./Portal.tsx";
 import { PlayerController } from "./PlayerController.tsx";
@@ -25,18 +24,6 @@ function MagicFogOff() {
   return null;
 }
 
-function RunnerExitKeys() {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (useGame.getState().chatOpen || e.repeat) return;
-      if (e.code === "KeyE") emitLeave();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-  return null;
-}
-
 export function MinigameRoom() {
   const location = useGame((s) => s.location);
   const nearby = useGame((s) => s.nearby);
@@ -47,12 +34,11 @@ export function MinigameRoom() {
   if (location.gameId === "lane-rush") {
     return (
       <group>
-        <RunnerExitKeys />
         <InfiniteRunner color={game.color} />
-        <Html position={[0, -0.2, 6]} center style={{ pointerEvents: "none" }}>
+        <Html position={[0, 0.6, 5.5]} center style={{ pointerEvents: "none" }}>
           <div className="arcade-label">
-            <strong>Return cabinet</strong>
-            <span>Press E or use Return in the HUD</span>
+            <strong>Leave anytime</strong>
+            <span>Use Return in the HUD (not E)</span>
           </div>
         </Html>
       </group>
