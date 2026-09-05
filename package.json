@@ -1,0 +1,19 @@
+{
+  "name": "holojay",
+  "private": true,
+  "workspaces": [
+    "client",
+    "server",
+    "shared"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,client -c cyan,magenta \"npm run dev -w @holojay/server\" \"npm run dev -w @holojay/client\"",
+    "dev:web": "npm run dev -w @holojay/client",
+    "build": "npm run build -w @holojay/client",
+    "preview": "npm run build && npm run preview -w @holojay/client",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

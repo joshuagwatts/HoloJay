@@ -1,0 +1,436 @@
+:root {
+  color-scheme: dark;
+  --ink: #07060d;
+  --paper: #f4ecdc;
+  --cyan: #7cf0ff;
+  --brass: #e4c07a;
+  --rose: #ff6b8a;
+  --line: rgba(244, 236, 220, 0.14);
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: var(--ink);
+  color: var(--paper);
+  overflow: hidden;
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+.shell,
+.boot,
+.auth {
+  position: relative;
+  height: 100%;
+}
+
+.shell canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+.boot {
+  display: grid;
+  place-items: center;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--brass);
+}
+
+.auth {
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(ellipse at 20% 20%, rgba(124, 240, 255, 0.12), transparent 42%),
+    radial-gradient(ellipse at 80% 80%, rgba(228, 192, 122, 0.1), transparent 40%),
+    var(--ink);
+}
+
+.auth-mark {
+  position: absolute;
+  width: min(80vw, 720px);
+  color: rgba(124, 240, 255, 0.09);
+  pointer-events: none;
+}
+
+.auth-card {
+  position: relative;
+  width: min(92vw, 440px);
+  padding: 32px 28px 24px;
+  border: 1px solid var(--line);
+  background: rgba(7, 6, 13, 0.72);
+  backdrop-filter: blur(12px);
+}
+
+.kicker {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--brass);
+}
+
+h1 {
+  font-family: Syne, sans-serif;
+  font-weight: 800;
+  font-size: 42px;
+  margin: 6px 0 10px;
+  letter-spacing: -0.03em;
+}
+
+.lede,
+.fine {
+  color: rgba(244, 236, 220, 0.72);
+  line-height: 1.45;
+}
+
+.fine {
+  font-size: 12px;
+  margin-bottom: 0;
+}
+
+.stack {
+  display: grid;
+  gap: 12px;
+  margin: 18px 0 10px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(244, 236, 220, 0.6);
+}
+
+input {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+  padding: 10px 12px;
+  outline: none;
+}
+
+input:focus {
+  border-color: var(--cyan);
+}
+
+.primary {
+  border: 0;
+  background: var(--cyan);
+  color: #041318;
+  font-weight: 600;
+  padding: 12px 14px;
+  cursor: pointer;
+}
+
+.primary:disabled {
+  opacity: 0.6;
+}
+
+.text {
+  background: none;
+  border: 0;
+  color: var(--brass);
+  cursor: pointer;
+  padding: 0;
+}
+
+.row-links {
+  display: flex;
+  justify-content: space-between;
+}
+
+.colors span {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(244, 236, 220, 0.6);
+}
+
+.colors div {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+
+.swatch.on {
+  border-color: var(--paper);
+}
+
+.error {
+  color: var(--rose);
+  font-size: 13px;
+}
+
+.hud {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 18px 22px;
+}
+
+.hud-top,
+.hud-bottom,
+.loop-rail,
+.prompt,
+.invite,
+.chat,
+.notice {
+  pointer-events: auto;
+}
+
+.hud-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.hud-top strong {
+  display: block;
+  font-family: Syne, sans-serif;
+  font-size: 22px;
+}
+
+.dot {
+  margin-left: 8px;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(244, 236, 220, 0.45);
+}
+
+.dot.on {
+  color: var(--cyan);
+}
+
+.hud-meta {
+  display: flex;
+  gap: 14px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(244, 236, 220, 0.62);
+}
+
+.loop-rail {
+  position: absolute;
+  top: 78px;
+  left: 22px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--brass);
+}
+
+.rail {
+  width: 180px;
+  height: 4px;
+  background: rgba(244, 236, 220, 0.12);
+}
+
+.rail i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--cyan), var(--brass));
+}
+
+.hint-center,
+.notice {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  background: rgba(7, 6, 13, 0.7);
+}
+
+.hint-center {
+  top: 46%;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 12px;
+}
+
+.notice {
+  top: 92px;
+  color: var(--brass);
+}
+
+.prompt {
+  position: absolute;
+  right: 22px;
+  bottom: 78px;
+  width: min(320px, 80vw);
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  background: rgba(7, 6, 13, 0.78);
+}
+
+.prompt-name {
+  font-family: Syne, sans-serif;
+  font-size: 22px;
+  margin: 0 0 4px;
+}
+
+.prompt-tag,
+.prompt-keys {
+  margin: 0;
+  color: rgba(244, 236, 220, 0.7);
+}
+
+.prompt-keys {
+  margin-top: 10px;
+}
+
+.invite {
+  position: absolute;
+  top: 92px;
+  right: 22px;
+  padding: 14px 16px;
+  border: 1px solid var(--brass);
+  background: rgba(7, 6, 13, 0.85);
+}
+
+.invite button {
+  margin-top: 8px;
+  border: 0;
+  background: var(--brass);
+  color: #1a1408;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.chat {
+  position: absolute;
+  left: 50%;
+  bottom: 78px;
+  transform: translateX(-50%);
+  width: min(420px, 86vw);
+}
+
+.chat input {
+  width: 100%;
+}
+
+.hud-bottom {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-size: 12px;
+  color: rgba(244, 236, 220, 0.7);
+}
+
+kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  margin: 0 2px;
+  border: 1px solid var(--line);
+  font-size: 11px;
+}
+
+.live {
+  color: var(--rose);
+}
+
+.portal-label,
+.nameplate,
+.plaza-title,
+.room-title {
+  font-family: "IBM Plex Sans", sans-serif;
+  text-align: center;
+  white-space: nowrap;
+  text-shadow: 0 2px 12px #000;
+}
+
+.portal-label {
+  display: grid;
+  color: #f4ecdc;
+  font-size: 12px;
+}
+
+.portal-label strong {
+  font-family: Syne, sans-serif;
+  font-size: 15px;
+}
+
+.portal-label.hot strong {
+  color: var(--cyan);
+}
+
+.nameplate {
+  display: grid;
+  gap: 4px;
+  color: #fff;
+  font-size: 12px;
+}
+
+.nameplate.you span {
+  color: var(--cyan);
+}
+
+.bubble {
+  background: rgba(7, 6, 13, 0.82);
+  border: 1px solid rgba(244, 236, 220, 0.2);
+  padding: 6px 8px;
+  border-radius: 4px;
+  max-width: 180px;
+  white-space: normal;
+}
+
+.plaza-title {
+  color: var(--brass);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+
+.room-title {
+  display: grid;
+  gap: 4px;
+  color: #f4ecdc;
+}
+
+.room-title em {
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-size: 11px;
+  font-style: normal;
+  color: var(--brass);
+}
+
+.room-title strong {
+  font-family: Syne, sans-serif;
+  font-size: 28px;
+}
