@@ -88,7 +88,7 @@ function terraceTop(elev: number): number {
 }
 
 type Role = "driver" | "gunner";
-type Phase = "ready" | "run" | "won" | "dead";
+type Phase = "ready" | "run" | "intro" | "won" | "dead";
 
 type Tile = {
   id: number;
@@ -171,7 +171,10 @@ export function SkyEscort({ color }: { color: string }) {
   const offline = useGame((s) => s.offline);
 
   const instanceId = location.type === "game" ? location.instanceId : "local:sky-escort";
-  const isHost = offline || hostIdFromInstance(instanceId) === selfId || instanceId.startsWith("local:");
+  const playerCount = Object.keys(players).length;
+  const solo = offline || instanceId.startsWith("local:") || playerCount <= 1;
+  // Solo must always simulate — otherwise the gate never advances.
+  const isHost = solo || hostIdFromInstance(instanceId) === selfId;
 
   const [levelIdx, setLevelIdx] = useState(0);
   const levelIdxRef = useRef(0);
@@ -185,6 +188,10 @@ export function SkyEscort({ color }: { color: string }) {
   const failCueT = useRef(0);
   const [clearBanner, setClearBanner] = useState<string | null>(null);
   const clearBannerT = useRef(0);
+  const [introLevel, setIntroLevel] = useState<{ idx: number; name: string } | null>(null);
+  const introT = useRef(0);
+  const advancing = useRef(false);
+  const introNextRef = useRef(1);
 
   const phaseRef = useRef<Phase>("ready");
   const seatRef = useRef<Role>("driver");
@@ -400,6 +407,46 @@ export function SkyEscort({ color }: { color: string }) {
     snapSeatCam(role);
   }
 
+
+  function beginAdvance() {
+    if (advancing.current || phaseRef.current !== "run") return;
+    advancing.current = true;
+    const next = levelIdxRef.current + 1;
+    const nextL = makeLevel(next);
+    // Freeze on the pad
+    speed.current = 0;
+    falling.current = false;
+    keys.current = { throttle: 0, steer: 0 };
+    z.current = Math.min(z.current, activeLevel().endZ);
+    introT.current = 2.6;
+    introNextRef.current = next;
+    setIntroLevel({ idx: next, name: nextL.name });
+    setPhaseBoth("intro");
+    emitMinigame(instanceId, "sky-escort", {
+      type: "role",
+      driverId: driverIdRef.current,
+      gunnerId: gunnerIdRef.current,
+      phase: "intro",
+      levelId: nextL.id,
+    } satisfies RoleMsg);
+  }
+
+  function finishIntro() {
+    const next = introNextRef.current;
+    const role = seatRef.current;
+    setIntroLevel(null);
+    introT.current = 0;
+    advancing.current = false;
+    resetRun(role, next);
+    emitMinigame(instanceId, "sky-escort", {
+      type: "role",
+      driverId: driverIdRef.current,
+      gunnerId: gunnerIdRef.current,
+      phase: "run",
+      levelId: makeLevel(next).id,
+    } satisfies RoleMsg);
+  }
+
   function resetRun(asRole: Role, nextLevelIdx = levelIdxRef.current) {
     setLevel(nextLevelIdx);
     const L = makeLevel(nextLevelIdx);
@@ -434,6 +481,7 @@ export function SkyEscort({ color }: { color: string }) {
     setFailCue(false);
     // keep clearBanner so the "cleared" toast can show into the next run
     snapSeatCam(asRole);
+    advancing.current = false;
     setPhaseBoth("run");
   }
 
@@ -490,6 +538,12 @@ export function SkyEscort({ color }: { color: string }) {
             levelId: activeLevel().id,
           } satisfies RoleMsg);
         }
+        return;
+      }
+
+      if (p === "intro" && (e.code === "Space" || e.code === "Enter")) {
+        e.preventDefault();
+        finishIntro();
         return;
       }
 
@@ -575,11 +629,23 @@ export function SkyEscort({ color }: { color: string }) {
         }
         if (data.driverId === selfId) pickSeat("driver");
         else if (data.gunnerId === selfId) pickSeat("gunner");
+        if (data.phase === "intro" && !isHost) {
+          const idx = levelIndexFromId(data.levelId);
+          const L = makeLevel(idx);
+          setIntroLevel({ idx, name: L.name });
+          introT.current = 2.6;
+          advancing.current = true;
+          setPhaseBoth("intro");
+        }
         if (data.phase === "run" && !isHost) {
-          const L = activeLevel();
+          const idx = levelIndexFromId(data.levelId);
+          setLevel(idx);
           buildTerrain();
+          const L = activeLevel();
           hullRef.current = L.hull;
           setHull(L.hull);
+          advancing.current = false;
+          setIntroLevel(null);
           setPhaseBoth("run");
         }
       }
@@ -629,6 +695,10 @@ export function SkyEscort({ color }: { color: string }) {
     if (clearBannerT.current > 0) {
       clearBannerT.current = Math.max(0, clearBannerT.current - clamped);
       if (clearBannerT.current <= 0) setClearBanner(null);
+    }
+    if (phaseRef.current === "intro") {
+      introT.current -= clamped;
+      if (introT.current <= 0) finishIntro();
     }
 
     if (phaseRef.current === "run" && seatRef.current === "driver" && !isHost) {
@@ -860,20 +930,10 @@ export function SkyEscort({ color }: { color: string }) {
       for (const bl of blasts.current) bl.age += clamped;
       blasts.current = blasts.current.filter((b) => b.age < 0.55);
 
-      // Gate reached — auto-roll into the next level (no Space required).
-      if (phaseRef.current === "run" && z.current <= level.endZ + level.tile * 0.35) {
-        const cleared = level.name;
-        const next = levelIdxRef.current + 1;
-        resetRun(seatRef.current, next);
-        clearBannerT.current = 2.2;
-        setClearBanner(`${cleared} cleared — ${makeLevel(next).name}`);
-        emitMinigame(instanceId, "sky-escort", {
-          type: "role",
-          driverId: driverIdRef.current,
-          gunnerId: gunnerIdRef.current,
-          phase: "run",
-          levelId: makeLevel(next).id,
-        } satisfies RoleMsg);
+      // Gate zone — generous trigger, then motion-graphic intro (auto, no Space).
+      const gateReach = level.endZ + level.tile * 2.5;
+      if (!advancing.current && phaseRef.current === "run" && z.current <= gateReach) {
+        beginAdvance();
       }
 
       snapAcc.current += clamped;
@@ -898,6 +958,16 @@ export function SkyEscort({ color }: { color: string }) {
         } satisfies Snap);
       }
       remoteInput.current = null;
+    }
+
+    // Failsafe: solo / host-desync still advance when crossing the gate.
+    if (
+      !advancing.current &&
+      phaseRef.current === "run" &&
+      (solo || isHost) &&
+      z.current <= activeLevel().endZ + activeLevel().tile * 2.5
+    ) {
+      beginAdvance();
     }
 
     if (phaseRef.current === "run" && !isHost && seatRef.current === "gunner") {
@@ -1106,7 +1176,20 @@ export function SkyEscort({ color }: { color: string }) {
 
       <Html fullscreen style={{ pointerEvents: phase === "ready" ? "auto" : "none" }}>
         <div className="sky-escort-hud">
-          <div className="sky-escort-card">
+          {phase === "intro" && introLevel && (
+            <div className="sky-escort-intro" aria-live="polite">
+              <div className="sky-escort-intro-scan" />
+              <div className="sky-escort-intro-glow" />
+              <p className="sky-escort-intro-kicker">Incoming sector</p>
+              <p className="sky-escort-intro-num">LEVEL {introLevel.idx + 1}</p>
+              <h2 className="sky-escort-intro-name">{introLevel.name}</h2>
+              <p className="sky-escort-intro-sub">Hold on — rolling out</p>
+              <div className="sky-escort-intro-bar">
+                <span />
+              </div>
+            </div>
+          )}
+          <div className="sky-escort-card" style={{ visibility: phase === "intro" ? "hidden" : "visible" }}>
             <em>{level.name}</em>
             <strong>Sky Escort</strong>
             {phase === "ready" && (
@@ -1165,7 +1248,7 @@ export function SkyEscort({ color }: { color: string }) {
             )}
             {phase === "won" && (
               <p className="sky-escort-alert">
-                {`Gate secured — rolling into ${makeLevel(levelIdx + 1).name}`}
+                {`Gate secured — deploying ${makeLevel(levelIdx + 1).name}`}
               </p>
             )}
             {phase === "dead" && <p>Buggy cooked — Space to retry</p>}

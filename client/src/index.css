@@ -683,3 +683,128 @@ kbd {
   color: #1a0a06;
   font-weight: 600;
 }
+
+
+.sky-escort-intro {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 10px;
+  text-align: center;
+  background: radial-gradient(ellipse at center, rgba(40, 18, 8, 0.92) 0%, rgba(6, 3, 2, 0.96) 70%);
+  overflow: hidden;
+  pointer-events: none;
+  animation: sky-intro-in 0.45s ease-out both;
+}
+
+.sky-escort-intro-scan {
+  position: absolute;
+  inset: -20% 0 auto;
+  height: 40%;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    rgba(255, 171, 64, 0.08),
+    transparent
+  );
+  animation: sky-intro-scan 2.4s linear infinite;
+}
+
+.sky-escort-intro-glow {
+  position: absolute;
+  width: 55vmax;
+  height: 55vmax;
+  left: 50%;
+  top: 45%;
+  translate: -50% -50%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 112, 67, 0.28), transparent 65%);
+  animation: sky-intro-pulse 1.8s ease-in-out infinite;
+}
+
+.sky-escort-intro-kicker {
+  position: relative;
+  margin: 0;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  font-size: 12px;
+  color: #ffab40;
+  opacity: 0.9;
+  animation: sky-intro-rise 0.7s 0.1s ease-out both;
+}
+
+.sky-escort-intro-num {
+  position: relative;
+  margin: 0;
+  font-family: Syne, sans-serif;
+  font-size: clamp(18px, 4vw, 28px);
+  letter-spacing: 0.35em;
+  color: rgba(244, 236, 220, 0.55);
+  animation: sky-intro-rise 0.7s 0.18s ease-out both;
+}
+
+.sky-escort-intro-name {
+  position: relative;
+  margin: 0;
+  font-family: Syne, sans-serif;
+  font-size: clamp(42px, 9vw, 84px);
+  line-height: 0.95;
+  letter-spacing: -0.03em;
+  color: #f4ecdc;
+  text-shadow: 0 0 40px rgba(255, 112, 67, 0.45);
+  animation: sky-intro-rise 0.75s 0.28s ease-out both;
+}
+
+.sky-escort-intro-sub {
+  position: relative;
+  margin: 8px 0 0;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-size: 12px;
+  color: rgba(244, 236, 220, 0.55);
+  animation: sky-intro-rise 0.7s 0.4s ease-out both;
+}
+
+.sky-escort-intro-bar {
+  position: relative;
+  width: min(52vw, 280px);
+  height: 3px;
+  margin: 18px auto 0;
+  background: rgba(244, 236, 220, 0.12);
+  overflow: hidden;
+  border-radius: 999px;
+}
+
+.sky-escort-intro-bar span {
+  display: block;
+  height: 100%;
+  width: 40%;
+  background: linear-gradient(90deg, #ff7043, #ffd54f);
+  animation: sky-intro-bar 2.4s ease-in-out forwards;
+}
+
+@keyframes sky-intro-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes sky-intro-rise {
+  from { opacity: 0; transform: translateY(18px) scale(0.98); filter: blur(4px); }
+  to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+
+@keyframes sky-intro-scan {
+  from { transform: translateY(0); }
+  to { transform: translateY(220%); }
+}
+
+@keyframes sky-intro-pulse {
+  0%, 100% { opacity: 0.55; transform: translate(-50%, -50%) scale(0.92); }
+  50% { opacity: 1; transform: translate(-50%, -50%) scale(1.05); }
+}
+
+@keyframes sky-intro-bar {
+  from { transform: translateX(-120%); }
+  to { transform: translateX(220%); }
+}
