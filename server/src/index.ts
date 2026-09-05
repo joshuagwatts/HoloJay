@@ -25,8 +25,12 @@ const app = express();
 app.use(
   cors({
     origin: (origin, cb) => {
-      if (!origin || origins.includes(origin) || origins.includes("*")) cb(null, true);
-      else cb(null, origins[0] ?? true);
+      // Allow Pages + local tools; tunnels still send Origin as the website
+      if (!origin || origins.includes(origin) || origins.includes("*") || origin.endsWith("github.io")) {
+        cb(null, true);
+      } else {
+        cb(null, true); // permissive for friend share tunnels
+      }
     },
     credentials: true,
   }),
@@ -38,7 +42,7 @@ app.use("/api/auth", authRouter);
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: origins.includes("*") ? true : origins,
+    origin: true,
     credentials: true,
   },
 });

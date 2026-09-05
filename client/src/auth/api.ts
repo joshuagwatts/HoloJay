@@ -1,5 +1,5 @@
 import type { AuthResponse, AuthUser, Favorite } from "@holojay/shared";
-import { apiUrl, hasMultiplayerHub } from "../net/config.ts";
+import { apiUrl, hasMultiplayerHub, loadRuntimeConfig } from "../net/config.ts";
 
 const TOKEN_KEY = "holojay.token";
 const USERS_KEY = "holojay.users";
@@ -60,7 +60,7 @@ async function tryRemote<T>(fn: () => Promise<T>): Promise<T | null> {
     return await Promise.race([
       fn(),
       new Promise<null>((_, reject) => {
-        window.setTimeout(() => reject(new Error("API timeout")), 2200);
+        window.setTimeout(() => reject(new Error("API timeout")), 4000);
       }),
     ]);
   } catch {
@@ -79,6 +79,7 @@ function localGuestUser(username: string, color: string): AuthUser {
 }
 
 export async function register(username: string, password: string, color: string): Promise<AuthResponse> {
+  await loadRuntimeConfig();
   if (hasMultiplayerHub()) {
     const remote = await tryRemote(() =>
       fetch(apiUrl("/api/auth/register"), {
@@ -102,6 +103,7 @@ export async function register(username: string, password: string, color: string
 }
 
 export async function login(username: string, password: string): Promise<AuthResponse> {
+  await loadRuntimeConfig();
   if (hasMultiplayerHub()) {
     const remote = await tryRemote(() =>
       fetch(apiUrl("/api/auth/login"), {
@@ -119,6 +121,8 @@ export async function login(username: string, password: string): Promise<AuthRes
 }
 
 export async function guest(username: string, color: string): Promise<AuthResponse> {
+  await loadRuntimeConfig();
+  // When a public hub is configured, always get a real JWT so friends can meet
   if (hasMultiplayerHub()) {
     const remote = await tryRemote(() =>
       fetch(apiUrl("/api/auth/guest"), {
@@ -133,7 +137,13 @@ export async function guest(username: string, color: string): Promise<AuthRespon
 }
 
 export async function me(token: string): Promise<{ user: AuthUser; favorites: Favorite[] }> {
+  await loadRuntimeConfig();
+
   if (token.startsWith("local.")) {
+    // Hub is up but this browser only has a solo token — force a fresh hub login
+    if (hasMultiplayerHub()) {
+      throw new Error("Reconnect to the multiplayer hub");
+    }
     const id = token.slice("local.".length);
     const users = Object.values(loadUsers());
     const row = users.find((u) => u.id === id);

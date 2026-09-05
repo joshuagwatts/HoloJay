@@ -15,9 +15,11 @@
     "build": "npm run build -w @holojay/client",
     "preview": "npm run build && npm run preview -w @holojay/client",
     "start:hub": "npm run start -w @holojay/server",
+    "share": "node scripts/share-hub.mjs",
     "smoke": "node scripts/smoke.mjs"
   },
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "concurrently": "^9.1.2",
+    "localtunnel": "^2.0.2"
   }
 }
