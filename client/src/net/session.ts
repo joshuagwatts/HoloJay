@@ -1,5 +1,6 @@
 import type { AuthUser } from "@holojay/shared";
 import { useGame } from "../state/store.ts";
+import { hasMultiplayerHub, loadRuntimeConfig } from "./config.ts";
 import {
   localChat,
   localEnter,
@@ -22,23 +23,18 @@ import {
   emitUnpin as remoteUnpin,
 } from "./socket.ts";
 
-export { disconnectRealm, startLocal };
-
-/** GitHub Pages / static builds have no realm server — always solo. */
-export function isStaticSolo(): boolean {
-  return !import.meta.env.DEV && !import.meta.env.VITE_SERVER_URL;
-}
+export { disconnectRealm, startLocal, loadRuntimeConfig, hasMultiplayerHub };
 
 function localMode(): boolean {
-  return useGame.getState().offline || isStaticSolo();
+  return useGame.getState().offline || !hasMultiplayerHub();
 }
 
 export function connectSession(token: string, user: AuthUser): void {
   disconnectRealm();
   useGame.getState().setLocation({ type: "hub" });
 
-  // Pages deploy (and any build without a server URL) must never wait on sockets
-  if (token.startsWith("local.") || isStaticSolo()) {
+  // Solo when no hub URL is configured (typical GitHub Pages until you add one)
+  if (token.startsWith("local.") || !hasMultiplayerHub()) {
     startLocal(user);
     return;
   }
@@ -50,9 +46,10 @@ export function connectSession(token: string, user: AuthUser): void {
   // If the hub never welcomes us, fall back to solo so refresh isn't a black hole
   window.setTimeout(() => {
     if (!useGame.getState().hubReady && useGame.getState().token === token) {
+      useGame.getState().setNotice("Hub offline — playing solo");
       startLocal(user);
     }
-  }, 2500);
+  }, 2800);
 }
 
 export function emitMove(position: { x: number; y: number; z: number }, rotY: number): void {

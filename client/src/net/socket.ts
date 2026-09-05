@@ -3,8 +3,8 @@ import { GAMES, compactFavorites, hatById, makeDresserHats, type PlayerPublic } 
 import { useGame } from "../state/store.ts";
 import { voice } from "../voice/proximity.ts";
 import { loadAllCompetitiveBoards } from "./scores.ts";
+import { getServerUrl } from "./config.ts";
 
-const SOCKET_URL = import.meta.env.VITE_SERVER_URL || (import.meta.env.DEV ? "http://127.0.0.1:3001" : "");
 const hatKey = (id: string) => `holojay.hat.${id}`;
 
 function hydrateHats(userId: string, seed: number) {
@@ -22,7 +22,8 @@ export function getSocket(): Socket | null {
 
 export function connectRealm(token: string): Socket {
   disconnectRealm();
-  const sock = io(SOCKET_URL, { auth: { token }, transports: ["websocket", "polling"] });
+  const url = getServerUrl();
+  const sock = io(url || undefined, { auth: { token }, transports: ["websocket", "polling"] });
   socket = sock;
 
   voice.sendSignal = (toId, data) => sock.emit("voice:signal", { toId, data });

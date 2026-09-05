@@ -1,4 +1,5 @@
 import type { AuthResponse, AuthUser, Favorite } from "@holojay/shared";
+import { apiUrl, hasMultiplayerHub } from "../net/config.ts";
 
 const TOKEN_KEY = "holojay.token";
 const USERS_KEY = "holojay.users";
@@ -59,7 +60,7 @@ async function tryRemote<T>(fn: () => Promise<T>): Promise<T | null> {
     return await Promise.race([
       fn(),
       new Promise<null>((_, reject) => {
-        window.setTimeout(() => reject(new Error("API timeout")), 1800);
+        window.setTimeout(() => reject(new Error("API timeout")), 2200);
       }),
     ]);
   } catch {
@@ -78,14 +79,16 @@ function localGuestUser(username: string, color: string): AuthUser {
 }
 
 export async function register(username: string, password: string, color: string): Promise<AuthResponse> {
-  const remote = await tryRemote(() =>
-    fetch("/api/auth/register", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password, color }),
-    }).then((res) => read<AuthResponse>(res)),
-  );
-  if (remote?.token && remote.user) return remote;
+  if (hasMultiplayerHub()) {
+    const remote = await tryRemote(() =>
+      fetch(apiUrl("/api/auth/register"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password, color }),
+      }).then((res) => read<AuthResponse>(res)),
+    );
+    if (remote?.token && remote.user) return remote;
+  }
 
   const name = username.trim();
   if (!USERNAME_RE.test(name)) throw new Error("Username must be 3-16 letters, numbers, or _");
@@ -99,14 +102,16 @@ export async function register(username: string, password: string, color: string
 }
 
 export async function login(username: string, password: string): Promise<AuthResponse> {
-  const remote = await tryRemote(() =>
-    fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
-    }).then((res) => read<AuthResponse>(res)),
-  );
-  if (remote?.token && remote.user) return remote;
+  if (hasMultiplayerHub()) {
+    const remote = await tryRemote(() =>
+      fetch(apiUrl("/api/auth/login"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      }).then((res) => read<AuthResponse>(res)),
+    );
+    if (remote?.token && remote.user) return remote;
+  }
 
   const row = loadUsers()[username.trim().toLowerCase()];
   if (!row || row.passHash !== (await sha256(password))) throw new Error("Wrong username or password");
@@ -114,18 +119,16 @@ export async function login(username: string, password: string): Promise<AuthRes
 }
 
 export async function guest(username: string, color: string): Promise<AuthResponse> {
-  // Static Pages: skip API entirely so "Drop in" never hangs
-  if (!import.meta.env.DEV && !import.meta.env.VITE_SERVER_URL) {
-    return localToken(localGuestUser(username, color));
+  if (hasMultiplayerHub()) {
+    const remote = await tryRemote(() =>
+      fetch(apiUrl("/api/auth/guest"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, color }),
+      }).then((res) => read<AuthResponse>(res)),
+    );
+    if (remote?.token && remote.user) return remote;
   }
-  const remote = await tryRemote(() =>
-    fetch("/api/auth/guest", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, color }),
-    }).then((res) => read<AuthResponse>(res)),
-  );
-  if (remote?.token && remote.user) return remote;
   return localToken(localGuestUser(username, color));
 }
 
@@ -142,7 +145,6 @@ export async function me(token: string): Promise<{ user: AuthUser; favorites: Fa
       const user = JSON.parse(raw) as AuthUser;
       if (user.id === id) return { user, favorites: [] };
     }
-    // Orphaned local token — synthesize a guest so refresh still enters the hub
     const orphan: AuthUser = {
       id,
       username: `orb_${id.slice(0, 4)}`,
@@ -153,13 +155,12 @@ export async function me(token: string): Promise<{ user: AuthUser; favorites: Fa
     return { user: orphan, favorites: [] };
   }
 
-  // Static Pages has no /api — don't hang waiting for a server JWT
-  if (!import.meta.env.DEV && !import.meta.env.VITE_SERVER_URL) {
+  if (!hasMultiplayerHub()) {
     throw new Error("Server session unavailable offline");
   }
 
   const remote = await tryRemote(() =>
-    fetch("/api/auth/me", {
+    fetch(apiUrl("/api/auth/me"), {
       headers: { Authorization: `Bearer ${token}` },
     }).then((res) => read<{ user: AuthUser; favorites: Favorite[] }>(res)),
   );

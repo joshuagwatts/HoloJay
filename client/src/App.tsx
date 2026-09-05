@@ -3,7 +3,7 @@ import { AuthOverlay } from "./ui/AuthOverlay.tsx";
 import { Hud } from "./ui/Hud.tsx";
 import { Realm } from "./world/Realm.tsx";
 import { clearToken, me, rememberGuest, savedToken, saveToken } from "./auth/api.ts";
-import { connectSession, disconnectRealm, isStaticSolo } from "./net/session.ts";
+import { connectSession, disconnectRealm, loadRuntimeConfig } from "./net/session.ts";
 import { useGame } from "./state/store.ts";
 
 export function App() {
@@ -16,6 +16,7 @@ export function App() {
     let cancelled = false;
 
     async function boot() {
+      await loadRuntimeConfig();
       const existing = savedToken();
       if (!existing) {
         if (!cancelled) setBooting(false);
@@ -25,15 +26,10 @@ export function App() {
       try {
         const { user: next } = await me(existing);
         if (cancelled) return;
-        // On Pages, rewrite any leftover server JWT into a local session token
-        const tokenToUse =
-          isStaticSolo() && !existing.startsWith("local.")
-            ? `local.${next.id}`
-            : existing;
-        saveToken(tokenToUse);
+        saveToken(existing);
         rememberGuest(next);
-        useGame.getState().setAuth(tokenToUse, next);
-        connectSession(tokenToUse, next);
+        useGame.getState().setAuth(existing, next);
+        connectSession(existing, next);
       } catch {
         clearToken();
       } finally {
@@ -51,7 +47,6 @@ export function App() {
     if (!token || !user) return;
     if (!useGame.getState().hubReady) connectSession(token, user);
     return () => {
-      // Do NOT flip hubReady off here — Strict Mode cleanup was trapping refresh on "Loading…"
       disconnectRealm();
     };
   }, [token, user]);

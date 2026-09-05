@@ -98,7 +98,7 @@ export function Hud() {
           <p className="kicker">Portal Realm</p>
           <strong>{user?.username}</strong>
           <span className={`dot ${connected || offline ? "on" : ""}`}>
-            {offline ? "solo" : connected ? "linked" : "linking"}
+            {offline ? "solo" : connected ? "multiplayer" : "linking"}
           </span>
         </div>
         <div className="hud-meta">
