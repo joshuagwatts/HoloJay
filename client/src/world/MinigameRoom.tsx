@@ -41,7 +41,7 @@ export function MinigameRoom() {
         </div>
       </Html>
       <Portal
-        position={[0, 1.5, -8]}
+        position={[0, 0, -8]}
         yaw={0}
         gameId={game.id}
         highlight={nearby?.source === "return"}

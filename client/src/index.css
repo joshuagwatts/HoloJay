@@ -365,6 +365,7 @@ kbd {
 }
 
 .portal-label,
+.arcade-label,
 .nameplate,
 .plaza-title,
 .room-title {
@@ -374,19 +375,29 @@ kbd {
   text-shadow: 0 2px 12px #000;
 }
 
-.portal-label {
+.portal-label,
+.arcade-label {
   display: grid;
   color: #f4ecdc;
   font-size: 12px;
 }
 
-.portal-label strong {
+.portal-label strong,
+.arcade-label strong {
   font-family: Syne, sans-serif;
   font-size: 15px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
-.portal-label.hot strong {
+.portal-label.hot strong,
+.arcade-label.hot strong {
   color: var(--cyan);
+}
+
+.arcade-label span {
+  opacity: 0.75;
+  font-size: 11px;
 }
 
 .nameplate {

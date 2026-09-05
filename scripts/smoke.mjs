@@ -13,7 +13,8 @@ function portalSlotPose(slot) {
   const len = Math.hypot(dx, dz) || 1;
   const nx = -(dz / len);
   const nz = dx / len;
-  return { x: x + nx * 3.4, y: 1.55, z: z + nz * 3.4 };
+  // Match client: cabinets sit outside the path and face inward
+  return { x: x + nx * 3.8, y: 0, z: z + nz * 3.8 };
 }
 
 async function json(path, opts = {}) {

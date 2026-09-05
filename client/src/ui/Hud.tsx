@@ -116,7 +116,7 @@ export function Hud() {
               <kbd>E</kbd>
             ) : (
               <>
-                <kbd>E</kbd> enter
+                <kbd>E</kbd> play
                 {nearby.source === "favorite" ? (
                   <>
                     {" "}
@@ -151,7 +151,7 @@ export function Hud() {
           <kbd>WASD</kbd> fly with the camera <kbd>Space</kbd> up <kbd>Shift</kbd> down <kbd>Q</kbd> sprint
         </span>
         <span>
-          <kbd>E</kbd> enter <kbd>F</kbd> favorite <kbd>T</kbd> chat
+          <kbd>E</kbd> play <kbd>F</kbd> favorite <kbd>T</kbd> chat
         </span>
         <span className={ptt ? "live" : ""}>
           <kbd>V</kbd> talk {micReady ? (ptt ? "• live" : "• ready") : "• hold to enable mic"}

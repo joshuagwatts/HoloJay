@@ -4,7 +4,7 @@ export const MAX_FAVORITES = 6;
 export const CHECKPOINT_COUNT = 16;
 export const PROXIMITY_RANGE = 20;
 export const PROXIMITY_VOICE_REF = 8;
-export const PORTAL_INTERACT_RANGE = 4.2;
+export const PORTAL_INTERACT_RANGE = 5.2;
 export const CHECKPOINT_RANGE = 7;
 export const MOVE_HZ = 15;
 

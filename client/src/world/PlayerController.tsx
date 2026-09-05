@@ -223,7 +223,7 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
     let best: typeof state.nearby = null;
     let bestD = PORTAL_INTERACT_RANGE;
     if (state.location.type === "game") {
-      const door = { x: 0, y: 1.5, z: -8 };
+      const door = { x: 0, y: 1.1, z: -8 };
       const d = dist3(here, door);
       if (d < bestD) best = { source: "return", slot: 0, gameId: state.location.gameId };
     } else {

@@ -29,14 +29,16 @@ export function portalSlotPose(slot: number) {
   const p = figure8Point(t);
   const tangent = figure8Tangent(t);
   const normal = figure8Normal(t);
-  const outward = 3.4;
+  const outward = 3.8;
+  // Face inward toward the path so players walk up to the screen
+  const face = { x: -normal.x, z: -normal.z };
   return {
     t,
     tangent,
-    yaw: Math.atan2(tangent.x, tangent.z),
+    yaw: Math.atan2(face.x, face.z),
     position: {
       x: p.x + normal.x * outward,
-      y: 1.55,
+      y: 0,
       z: p.z + normal.z * outward,
     },
   };
@@ -44,10 +46,11 @@ export function portalSlotPose(slot: number) {
 
 export function favoriteSlotPose(slot: number, total = MAX_FAVORITES) {
   const angle = (slot / total) * Math.PI * 2 - Math.PI / 2;
-  const r = 5.6;
+  const r = 6.2;
   return {
+    // Face the plaza center
     yaw: angle + Math.PI,
-    position: { x: Math.cos(angle) * r, y: 1.45, z: Math.sin(angle) * r },
+    position: { x: Math.cos(angle) * r, y: 0, z: Math.sin(angle) * r },
   };
 }
 
