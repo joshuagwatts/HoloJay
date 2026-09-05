@@ -600,3 +600,86 @@ kbd {
   color: var(--brass);
   font-variant-numeric: tabular-nums;
 }
+
+.sky-escort-hud {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: start center;
+  padding-top: 7vh;
+  pointer-events: none;
+}
+
+.sky-escort-card {
+  pointer-events: auto;
+  min-width: min(92vw, 420px);
+  padding: 18px 20px;
+  background: rgba(10, 6, 4, 0.82);
+  border: 1px solid rgba(255, 171, 64, 0.28);
+  color: #f4ecdc;
+  display: grid;
+  gap: 8px;
+  text-align: center;
+}
+
+.sky-escort-card em {
+  font-style: normal;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  font-size: 11px;
+  color: #ffab40;
+}
+
+.sky-escort-card strong {
+  font-family: Syne, sans-serif;
+  font-size: 30px;
+  letter-spacing: -0.02em;
+}
+
+.sky-escort-card p {
+  margin: 0;
+  line-height: 1.35;
+}
+
+.sky-escort-hint {
+  font-size: 13px;
+  opacity: 0.72;
+}
+
+.sky-escort-alert {
+  color: #ffab40;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 13px;
+}
+
+.sky-escort-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.sky-escort-actions button {
+  border: 1px solid rgba(244, 236, 220, 0.25);
+  background: transparent;
+  color: inherit;
+  padding: 8px 14px;
+  cursor: pointer;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 12px;
+}
+
+.sky-escort-actions button.on {
+  border-color: #ffab40;
+  color: #ffab40;
+}
+
+.sky-escort-actions button.primary {
+  background: #ff7043;
+  border-color: #ff7043;
+  color: #1a0a06;
+  font-weight: 600;
+}
