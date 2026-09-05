@@ -69,7 +69,17 @@ function terrainNoise(x: number, z: number): number {
 type Role = "driver" | "gunner";
 type Phase = "ready" | "run" | "won" | "dead";
 
-type Tile = { id: number; x: number; z: number; drop: number; gone: boolean; h: number; shade: number };
+type Tile = {
+  id: number;
+  x: number;
+  z: number;
+  drop: number;
+  gone: boolean;
+  h: number;
+  shade: number;
+  /** Finish pad — never craters; solid ground under the gate. */
+  safe?: boolean;
+};
 type Meteor = { id: number; x: number; y: number; z: number; vx: number; vy: number; vz: number };
 type Alien = { id: number; x: number; y: number; z: number; hp: number };
 type Bullet = { id: number; x: number; y: number; z: number; dx: number; dy: number; dz: number };
@@ -227,6 +237,13 @@ export function SkyEscort({ color }: { color: string }) {
         roughness: 0.92,
         flatShading: true,
       }),
+      finish: new THREE.MeshStandardMaterial({
+        color: "#c9a227",
+        emissive: "#ffd54f",
+        emissiveIntensity: 0.75,
+        roughness: 0.7,
+        flatShading: true,
+      }),
       dirtHot: new THREE.MeshStandardMaterial({
         color: "#6a3010",
         emissive: color,
@@ -282,12 +299,20 @@ export function SkyEscort({ color }: { color: string }) {
     const L = activeLevel();
     const list: Tile[] = [];
     let id = 1;
-    for (let zz = L.startZ + L.tile; zz > L.endZ - L.tile * 2; zz -= L.tile) {
-      for (let xx = -L.halfW; xx <= L.halfW; xx += L.tile) {
+    // Snap grid to tile size so slabs stay edge-flush.
+    const x0 = -Math.ceil(L.halfW / L.tile) * L.tile;
+    const x1 = Math.ceil(L.halfW / L.tile) * L.tile;
+    const z0 = Math.ceil((L.startZ + L.tile) / L.tile) * L.tile;
+    // Extra rows past the gate so finish pad has solid ground.
+    const z1 = Math.floor((L.endZ - L.tile * 4) / L.tile) * L.tile;
+    for (let zz = z0; zz >= z1; zz -= L.tile) {
+      for (let xx = x0; xx <= x1; xx += L.tile) {
         const n = terrainNoise(xx, zz);
-        const h = 0.15 + n * 0.7;
-        const shade = Math.floor(terrainNoise(xx + 9, zz - 4) * 4);
-        list.push({ id: id++, x: xx, z: zz, drop: 0, gone: false, h, shade });
+        const finish =
+          zz <= L.endZ + L.tile * 1.5 && zz >= L.endZ - L.tile * 2.5 && Math.abs(xx) <= L.tile * 3;
+        const h = finish ? 0.22 : 0.15 + n * 0.7;
+        const shade = finish ? 0 : Math.floor(terrainNoise(xx + 9, zz - 4) * 4);
+        list.push({ id: id++, x: xx, z: zz, drop: 0, gone: false, h, shade, safe: finish });
       }
     }
     tiles.current = list;
@@ -527,6 +552,7 @@ export function SkyEscort({ color }: { color: string }) {
           ...t,
           h: t.h ?? 0.35,
           shade: t.shade ?? 0,
+          safe: t.safe ?? false,
         }));
         meteors.current = data.meteors;
         aliens.current = data.aliens;
@@ -654,7 +680,7 @@ export function SkyEscort({ color }: { color: string }) {
           // Crater: impact tile + neighbors
           const craterR = level.tile * 1.15;
           for (const t of tiles.current) {
-            if (t.gone || t.drop > 0) continue;
+            if (t.gone || t.drop > 0 || t.safe) continue;
             if (Math.hypot(t.x - m.x, t.z - m.z) < craterR) t.drop = 0.01;
           }
           m.y = -99;
@@ -779,7 +805,16 @@ export function SkyEscort({ color }: { color: string }) {
       for (const bl of blasts.current) bl.age += clamped;
       blasts.current = blasts.current.filter((b) => b.age < 0.55);
 
-      if (z.current <= level.endZ) setPhaseBoth("won");
+      // Reach the finish pad — stop cleanly so we don't clip into the gate / fall off the far edge.
+      if (z.current <= level.endZ + level.tile * 0.35) {
+        z.current = level.endZ;
+        speed.current = 0;
+        falling.current = false;
+        y.current = 0.85;
+        keys.current.throttle = 0;
+        keys.current.steer = 0;
+        if (phaseRef.current === "run") setPhaseBoth("won");
+      }
 
       snapAcc.current += clamped;
       if (!instanceId.startsWith("local:") && snapAcc.current >= 1 / 15) {
@@ -832,6 +867,7 @@ export function SkyEscort({ color }: { color: string }) {
         mesh.rotation.z = t.drop > 0 ? t.drop * 0.05 * Math.sign(t.x || 1) : 0;
         mesh.rotation.x = t.drop > 0 ? t.drop * 0.03 : (t.h ?? 0) * 0.04 - 0.02;
         if (t.drop > 0) mesh.material = mats.dirtHot;
+        else if (t.safe) mesh.material = mats.finish;
         else if ((t.shade ?? 0) >= 3) mesh.material = mats.rock;
         else mesh.material = mats.dirt[(t.shade ?? 0) % mats.dirt.length];
       },
@@ -929,10 +965,24 @@ export function SkyEscort({ color }: { color: string }) {
         <boxGeometry args={[22, 5, 1.2]} />
         <meshStandardMaterial color="#3e2723" emissive={color} emissiveIntensity={0.2} />
       </mesh>
-      <mesh position={[0, 3.2, level.endZ - 1]}>
-        <boxGeometry args={[18, 7, 0.8]} />
-        <meshStandardMaterial color="#ffe082" emissive="#ffd54f" emissiveIntensity={1.2} />
+      {/* Drive-through finish arch + lit pad (not a solid wall you clip into). */}
+      <mesh position={[-7.5, 3.2, level.endZ]} castShadow>
+        <boxGeometry args={[1.2, 6.4, 1.2]} />
+        <meshStandardMaterial color="#ffe082" emissive="#ffd54f" emissiveIntensity={1.1} />
       </mesh>
+      <mesh position={[7.5, 3.2, level.endZ]} castShadow>
+        <boxGeometry args={[1.2, 6.4, 1.2]} />
+        <meshStandardMaterial color="#ffe082" emissive="#ffd54f" emissiveIntensity={1.1} />
+      </mesh>
+      <mesh position={[0, 6.2, level.endZ]} castShadow>
+        <boxGeometry args={[16.2, 1.1, 1.2]} />
+        <meshStandardMaterial color="#ffe082" emissive="#ffd54f" emissiveIntensity={1.25} />
+      </mesh>
+      <mesh position={[0, 0.08, level.endZ]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[16, 10]} />
+        <meshStandardMaterial color="#ffecb3" emissive="#ffd54f" emissiveIntensity={0.55} transparent opacity={0.85} />
+      </mesh>
+      <pointLight position={[0, 5, level.endZ]} color="#ffe082" intensity={18} distance={28} />
 
       <group ref={tileGroup} />
       <group ref={meteorGroup} />
