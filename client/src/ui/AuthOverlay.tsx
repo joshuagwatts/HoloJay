@@ -3,6 +3,7 @@ import { ORB_COLORS } from "@holojay/shared";
 import { guest, login, register, rememberGuest, saveToken } from "../auth/api.ts";
 import { connectSession, loadRuntimeConfig } from "../net/session.ts";
 import { useGame } from "../state/store.ts";
+import { ChannelBadge } from "./ChannelBadge.tsx";
 
 type Mode = "enter" | "login" | "register";
 
@@ -76,7 +77,10 @@ export function AuthOverlay() {
         </svg>
       </div>
       <div className="auth-card">
-        <p className="kicker">HoloJay</p>
+        <p className="kicker">
+          HoloJay
+          <ChannelBadge />
+        </p>
         <h1>Portal Realm</h1>
         <p className="lede">
           Become a glowing orb. Drift the figure-eight. Pin the doors you love at the crossing — everything else

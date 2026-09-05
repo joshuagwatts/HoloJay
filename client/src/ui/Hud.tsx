@@ -5,6 +5,7 @@ import { setPadAxis, setPadSprint } from "../inputPad.ts";
 import { wearHat } from "../net/localRealm.ts";
 import { disconnectRealm, emitChat, emitEnter, emitFollow, emitLeave, emitPin, emitUnpin } from "../net/session.ts";
 import { useGame } from "../state/store.ts";
+import { ChannelBadge } from "./ChannelBadge.tsx";
 
 function holdAxis(axis: "forward" | "right" | "up", value: number) {
   return {
@@ -95,7 +96,10 @@ export function Hud() {
     <div className="hud">
       <header className="hud-top">
         <div>
-          <p className="kicker">Portal Realm</p>
+          <p className="kicker">
+            Portal Realm
+            <ChannelBadge />
+          </p>
           <strong>{user?.username}</strong>
           <span className={`dot ${connected || offline ? "on" : ""}`}>
             {offline ? "solo" : connected ? "multiplayer" : "linking"}

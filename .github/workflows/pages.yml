@@ -2,7 +2,7 @@ name: Deploy Portal Realm to GitHub Pages
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, beta]
   workflow_dispatch:
 
 permissions:
@@ -18,16 +18,47 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout alpha (master)
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          path: alpha-src
+
+      - name: Checkout beta
+        uses: actions/checkout@v4
+        with:
+          ref: beta
+          path: beta-src
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
-      - run: npm ci
-      - run: npm run build
+          cache-dependency-path: alpha-src/package-lock.json
+
+      - name: Build alpha → /alpha/
+        working-directory: alpha-src
+        env:
+          VITE_CHANNEL: alpha
+        run: |
+          npm ci
+          npm run build
+          mkdir -p ../_site/alpha
+          cp -a client/dist/. ../_site/alpha/
+
+      - name: Build beta → /
+        working-directory: beta-src
+        env:
+          VITE_CHANNEL: beta
+        run: |
+          npm ci
+          npm run build
+          mkdir -p ../_site
+          cp -a client/dist/. ../_site/
+
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: client/dist
+          path: _site
 
   deploy:
     needs: build
