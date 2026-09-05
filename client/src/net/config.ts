@@ -16,22 +16,37 @@ function normalizeHub(url: string): string {
   return url.trim().replace(/\/$/, "");
 }
 
-/** Read ?hub=https://… and remember it for the next visit. */
+async function fetchWithTimeout(url: string, ms: number, init?: RequestInit): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = window.setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+/** Only honor an explicit ?hub= link (session). Stale tunnels in localStorage were hanging boot. */
 function applyQueryHub(): void {
   try {
     const params = new URLSearchParams(window.location.search);
     const fromQuery = params.get("hub")?.trim();
     if (fromQuery) {
       serverUrl = normalizeHub(fromQuery);
-      localStorage.setItem(HUB_STORAGE_KEY, serverUrl);
-      // Clean the URL so refreshes stay tidy
+      sessionStorage.setItem(HUB_STORAGE_KEY, serverUrl);
       params.delete("hub");
       const next = `${window.location.pathname}${params.toString() ? `?${params}` : ""}${window.location.hash}`;
       window.history.replaceState({}, "", next);
       return;
     }
-    const stored = localStorage.getItem(HUB_STORAGE_KEY)?.trim();
-    if (stored) serverUrl = normalizeHub(stored);
+    const sessionHub = sessionStorage.getItem(HUB_STORAGE_KEY)?.trim();
+    if (sessionHub) serverUrl = normalizeHub(sessionHub);
+  } catch {
+    /* ignore */
+  }
+  // Drop any old persistent hub that used to block every refresh
+  try {
+    localStorage.removeItem(HUB_STORAGE_KEY);
   } catch {
     /* ignore */
   }
@@ -43,19 +58,17 @@ export async function loadRuntimeConfig(): Promise<string> {
 
   applyQueryHub();
 
-  // Query/localStorage win over config.json so a shared link just works
-  if (!serverUrl || import.meta.env.DEV) {
+  // Only read config.json when we don't already have a hub from ?hub= / env
+  if (!serverUrl) {
     try {
-      const res = await fetch("./config.json", { cache: "no-store" });
+      const res = await fetchWithTimeout("./config.json", 1200, { cache: "no-store" });
       if (res.ok) {
         const json = (await res.json()) as RuntimeConfig;
         const fromFile = json.serverUrl?.trim();
-        if (fromFile && !localStorage.getItem(HUB_STORAGE_KEY)) {
-          serverUrl = normalizeHub(fromFile);
-        }
+        if (fromFile) serverUrl = normalizeHub(fromFile);
       }
     } catch {
-      /* solo is fine */
+      /* solo is fine — never block boot */
     }
   }
 
@@ -72,7 +85,13 @@ export function hasMultiplayerHub(): boolean {
 }
 
 export function clearHubOverride(): void {
-  localStorage.removeItem(HUB_STORAGE_KEY);
+  try {
+    sessionStorage.removeItem(HUB_STORAGE_KEY);
+    localStorage.removeItem(HUB_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+  if (!import.meta.env.DEV) serverUrl = "";
 }
 
 export function apiUrl(path: string): string {

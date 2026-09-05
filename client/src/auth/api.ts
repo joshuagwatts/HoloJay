@@ -60,7 +60,7 @@ async function tryRemote<T>(fn: () => Promise<T>): Promise<T | null> {
     return await Promise.race([
       fn(),
       new Promise<null>((_, reject) => {
-        window.setTimeout(() => reject(new Error("API timeout")), 4000);
+        window.setTimeout(() => reject(new Error("API timeout")), 2000);
       }),
     ]);
   } catch {

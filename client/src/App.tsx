@@ -3,7 +3,8 @@ import { AuthOverlay } from "./ui/AuthOverlay.tsx";
 import { Hud } from "./ui/Hud.tsx";
 import { Realm } from "./world/Realm.tsx";
 import { clearToken, me, rememberGuest, savedToken, saveToken } from "./auth/api.ts";
-import { connectSession, loadRuntimeConfig } from "./net/session.ts";
+import { clearHubOverride, hasMultiplayerHub } from "./net/config.ts";
+import { connectSession, loadRuntimeConfig, startLocal } from "./net/session.ts";
 import { useGame } from "./state/store.ts";
 
 export function App() {
@@ -17,24 +18,38 @@ export function App() {
     let cancelled = false;
 
     async function boot() {
-      await loadRuntimeConfig();
-      const existing = savedToken();
-      if (!existing) {
+      const safety = window.setTimeout(() => {
         if (!cancelled) setBooting(false);
-        return;
-      }
+      }, 2500);
 
       try {
-        const { user: next } = await me(existing);
-        if (cancelled) return;
-        saveToken(existing);
-        rememberGuest(next);
-        useGame.getState().setAuth(existing, next);
-        connectSession(existing, next);
-        sessionStarted.current = true;
-      } catch {
-        clearToken();
+        await Promise.race([
+          loadRuntimeConfig(),
+          new Promise<void>((resolve) => window.setTimeout(resolve, 1200)),
+        ]);
+
+        const existing = savedToken();
+        if (!existing) return;
+
+        try {
+          const { user: next } = await Promise.race([
+            me(existing),
+            new Promise<never>((_, reject) => {
+              window.setTimeout(() => reject(new Error("me timeout")), 2000);
+            }),
+          ]);
+          if (cancelled) return;
+          saveToken(existing);
+          rememberGuest(next);
+          useGame.getState().setAuth(existing, next);
+          connectSession(existing, next);
+          sessionStarted.current = true;
+        } catch {
+          if (hasMultiplayerHub()) clearHubOverride();
+          clearToken();
+        }
       } finally {
+        window.clearTimeout(safety);
         if (!cancelled) setBooting(false);
       }
     }
@@ -45,7 +60,6 @@ export function App() {
     };
   }, []);
 
-  // Fresh login from AuthOverlay — start plaza once (don't tear down on Strict Mode cleanup)
   useEffect(() => {
     if (!token || !user) {
       sessionStarted.current = false;
@@ -55,6 +69,17 @@ export function App() {
     sessionStarted.current = true;
     connectSession(token, user);
   }, [token, user]);
+
+  // Never leave the user on "Opening…" — force solo plaza if hub didn't come up
+  useEffect(() => {
+    if (booting || !user || hubReady) return;
+    const t = window.setTimeout(() => {
+      if (!useGame.getState().hubReady && useGame.getState().user) {
+        startLocal(useGame.getState().user!);
+      }
+    }, 800);
+    return () => window.clearTimeout(t);
+  }, [booting, user, hubReady]);
 
   if (booting) {
     return (
@@ -66,7 +91,6 @@ export function App() {
 
   if (!user) return <AuthOverlay />;
 
-  // Solo startLocal is sync — hubReady should already be true. If multiplayer is linking, still show the world.
   if (!hubReady) {
     return (
       <div className="boot">
