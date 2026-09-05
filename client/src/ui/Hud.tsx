@@ -118,7 +118,9 @@ export function Hud() {
       </div>
 
       {!pointerLocked && !chatOpen ? (
-        <div className="hint-center">Click the realm to look around · Esc frees the mouse</div>
+        <div className="hint-center">
+          Click to capture look · while flying, two-finger swipe steers · Esc frees mouse
+        </div>
       ) : null}
 
       {notice ? <div className="notice">{notice}</div> : null}
@@ -200,9 +202,7 @@ export function Hud() {
 
       <footer className="hud-bottom">
         <span>Mouse / trackpad look · scroll zoom · pad / WASD fly</span>
-        <span>
-          <kbd>E</kbd> play · <kbd>[</kbd><kbd>]</kbd> look sens · <kbd>Esc</kbd> free mouse
-        </span>
+        <span>While moving: two-finger swipe also steers (trackpad)</span>
         <span className={ptt ? "live" : ""}>
           <kbd>V</kbd> talk {micReady ? (ptt ? "• live" : "• ready") : ""}
         </span>

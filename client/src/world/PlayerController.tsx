@@ -12,13 +12,27 @@ import {
   favoriteSlotPose,
   portalSlotPose,
 } from "@holojay/shared";
-import { pad } from "../inputPad.ts";
+import { isPadMoving, pad, setOnPadRelease } from "../inputPad.ts";
 import { emitEnter, emitLeave, emitLoopComplete, emitMove, emitPin, emitUnpin } from "../net/session.ts";
 import { useGame } from "../state/store.ts";
 import { voice } from "../voice/proximity.ts";
 import { Orb } from "./Orb.tsx";
 
 const keys = new Set<string>();
+const MOVE_KEYS = new Set([
+  "KeyW",
+  "KeyA",
+  "KeyS",
+  "KeyD",
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "Space",
+  "ShiftLeft",
+  "ShiftRight",
+  "KeyQ",
+]);
 const up = new THREE.Vector3(0, 1, 0);
 const fwd = new THREE.Vector3();
 const right = new THREE.Vector3();
@@ -45,6 +59,13 @@ function scaleLookDelta(d: number) {
 function loadLookSens() {
   const n = Number(localStorage.getItem(LOOK_SENS_KEY));
   return Number.isFinite(n) && n > 0 ? Math.min(3, Math.max(0.35, n)) : 1;
+}
+
+function isKeyboardMoving() {
+  for (const code of MOVE_KEYS) {
+    if (keys.has(code)) return true;
+  }
+  return false;
 }
 
 function tryInteract() {
@@ -93,10 +114,24 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
 
   useEffect(() => {
     const el = gl.domElement;
+    const tryRelock = () => {
+      if (useGame.getState().chatOpen) return;
+      if (document.pointerLockElement === el) return;
+      void el.requestPointerLock().catch(() => {
+        /* browser may require a fresh click */
+      });
+    };
+
+    // After using the on-screen pad, grab mouse look again so rotate keeps working mid-flight
+    setOnPadRelease(() => {
+      window.setTimeout(tryRelock, 0);
+    });
+
     const down = (e: KeyboardEvent) => {
       keys.add(e.code);
       const state = useGame.getState();
       if (state.chatOpen) return;
+      if (MOVE_KEYS.has(e.code)) tryRelock();
       if (e.repeat) return;
       if (e.code === "KeyV") {
         e.preventDefault();
@@ -145,23 +180,36 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
     };
     const mouseMove = (e: MouseEvent) => {
       if (useGame.getState().chatOpen) return;
-      if (document.pointerLockElement !== el) return;
-      // Queue deltas so trackpad micro-moves accumulate smoothly per frame
+      const locked = document.pointerLockElement === el;
+      // While flying, still accept deltas if the browser keeps sending them without lock
+      if (!locked && !isKeyboardMoving() && !isPadMoving()) return;
+      if (!locked && (e.movementX === 0 && e.movementY === 0)) return;
       lookQueueX.current += scaleLookDelta(e.movementX);
       lookQueueY.current += scaleLookDelta(e.movementY);
     };
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
-      // Trackpads often send pixel deltas — scale by magnitude, not just sign
+      if (useGame.getState().chatOpen) return;
+      const ax = Math.abs(e.deltaX);
+      const ay = Math.abs(e.deltaY);
+      const moving = isKeyboardMoving() || isPadMoving();
+      const locked = document.pointerLockElement === el;
+      // Two-finger trackpad pan steers while moving (palm rejection often kills one-finger look)
+      if (moving || ax > ay * 1.15) {
+        lookQueueX.current += scaleLookDelta(e.deltaX * 0.75);
+        lookQueueY.current += scaleLookDelta(e.deltaY * 0.75);
+        if (moving) return;
+      }
+      if (locked && ax > 2 && ax > ay) {
+        lookQueueX.current += scaleLookDelta(e.deltaX * 0.75);
+        return;
+      }
       const step = Math.abs(e.deltaY) > 40 ? Math.sign(e.deltaY) * 0.85 : e.deltaY * 0.02;
       zoom.current = Math.max(3.4, Math.min(18, zoom.current + step));
     };
     const lockChange = () => {
       useGame.getState().setPointerLocked(document.pointerLockElement === el);
-      if (document.pointerLockElement !== el) {
-        lookQueueX.current = 0;
-        lookQueueY.current = 0;
-      }
+      // Don't wipe the look queue — clearing it mid-move made rotate feel "dead" until click
     };
     const blockMenu = (e: Event) => e.preventDefault();
 
@@ -169,15 +217,16 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
     window.addEventListener("keyup", upKey);
     el.addEventListener("click", click);
     document.addEventListener("mousemove", mouseMove);
-    el.addEventListener("wheel", wheel, { passive: false });
+    window.addEventListener("wheel", wheel, { passive: false });
     document.addEventListener("pointerlockchange", lockChange);
     el.addEventListener("contextmenu", blockMenu);
     return () => {
+      setOnPadRelease(null);
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", upKey);
       el.removeEventListener("click", click);
       document.removeEventListener("mousemove", mouseMove);
-      el.removeEventListener("wheel", wheel);
+      window.removeEventListener("wheel", wheel);
       document.removeEventListener("pointerlockchange", lockChange);
       el.removeEventListener("contextmenu", blockMenu);
       keys.clear();
