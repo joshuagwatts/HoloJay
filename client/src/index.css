@@ -501,3 +501,64 @@ kbd {
   font-family: Syne, sans-serif;
   font-size: 28px;
 }
+
+.room-title .lb-best {
+  color: var(--cyan);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+}
+
+.cabinet-lb {
+  min-width: 148px;
+  padding: 8px 10px;
+  background: rgba(7, 6, 13, 0.88);
+  border: 1px solid rgba(244, 236, 220, 0.18);
+  color: #f4ecdc;
+  font-size: 11px;
+  text-align: left;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.cabinet-lb.hot {
+  border-color: rgba(124, 240, 255, 0.45);
+}
+
+.cabinet-lb-title {
+  font-family: Syne, sans-serif;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-size: 10px;
+  color: var(--brass);
+  margin-bottom: 6px;
+}
+
+.cabinet-lb-empty {
+  opacity: 0.55;
+  font-size: 10px;
+}
+
+.cabinet-lb-row {
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  gap: 6px;
+  align-items: baseline;
+  padding: 2px 0;
+}
+
+.cabinet-lb-row b {
+  color: var(--cyan);
+  font-size: 10px;
+}
+
+.cabinet-lb-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 88px;
+}
+
+.cabinet-lb-row em {
+  font-style: normal;
+  color: var(--brass);
+  font-variant-numeric: tabular-nums;
+}

@@ -1,4 +1,5 @@
 import {
+  GAMES,
   canPin,
   compactFavorites,
   gameById,
@@ -9,6 +10,7 @@ import {
   type Favorite,
 } from "@holojay/shared";
 import { useGame } from "../state/store.ts";
+import { loadAllCompetitiveBoards } from "./scores.ts";
 
 const favKey = (id: string) => `holojay.favorites.${id}`;
 const seedKey = (id: string) => `holojay.seed.${id}`;
@@ -17,7 +19,8 @@ const hatKey = (id: string) => `holojay.hat.${id}`;
 function loadFavorites(userId: string): Favorite[] {
   try {
     const raw = localStorage.getItem(favKey(userId));
-    return raw ? (JSON.parse(raw) as Favorite[]) : [];
+    const list = raw ? (JSON.parse(raw) as Favorite[]) : [];
+    return compactFavorites(list);
   } catch {
     return [];
   }
@@ -51,6 +54,10 @@ export function saveWornHat(userId: string, hatId: string | null): void {
 
 export function applyDresserHats(seed: number): void {
   useGame.getState().setDresserHats(makeDresserHats(seed));
+}
+
+function hydrateLeaderboards(): void {
+  useGame.getState().setLeaderboards(loadAllCompetitiveBoards(GAMES.map((g) => g.id)));
 }
 
 export function wearHat(hatId: string | null): void {
@@ -92,6 +99,7 @@ export function startLocal(user: AuthUser): void {
   });
   useGame.getState().setWornHatId(loadWornHat(user.id));
   applyDresserHats(seed);
+  hydrateLeaderboards();
 }
 
 export function localPin(gameId: string): void {
@@ -144,7 +152,11 @@ export function localEnter(source: "path" | "favorite", slot: number, gameId: st
     return;
   }
   state.setLocation({ type: "game", gameId, instanceId: `local:${gameId}` });
-  state.setNotice("Hold E at the return door to leave");
+  if (gameId === "lane-rush") {
+    state.setNotice("Lane Rush — Enter to start · E to return");
+  } else {
+    state.setNotice("Hold E at the return door to leave");
+  }
 }
 
 export function localLeave(): void {

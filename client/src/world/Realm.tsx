@@ -17,6 +17,7 @@ const HUB_SPAWN: [number, number, number] = [0, 1.2, 3.2];
 function Hub() {
   const assignments = useGame((s) => s.assignments);
   const nearby = useGame((s) => s.nearby);
+  const total = Math.max(1, assignments.length);
 
   return (
     <>
@@ -31,7 +32,7 @@ function Hub() {
       <FavoritesPlaza />
       <HatDresser />
       {assignments.map((assignment) => {
-        const pose = portalSlotPose(assignment.slot);
+        const pose = portalSlotPose(assignment.slot, total);
         const hot = nearby?.source === "path" && nearby.slot === assignment.slot;
         return (
           <Portal

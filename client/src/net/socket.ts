@@ -1,7 +1,8 @@
 import { io, type Socket } from "socket.io-client";
-import { hatById, makeDresserHats, type PlayerPublic } from "@holojay/shared";
+import { GAMES, compactFavorites, hatById, makeDresserHats, type PlayerPublic } from "@holojay/shared";
 import { useGame } from "../state/store.ts";
 import { voice } from "../voice/proximity.ts";
+import { loadAllCompetitiveBoards } from "./scores.ts";
 
 const SOCKET_URL = import.meta.env.VITE_SERVER_URL || (import.meta.env.DEV ? "http://127.0.0.1:3001" : "");
 const hatKey = (id: string) => `holojay.hat.${id}`;
@@ -10,6 +11,7 @@ function hydrateHats(userId: string, seed: number) {
   const worn = localStorage.getItem(hatKey(userId));
   useGame.getState().setWornHatId(worn && hatById(worn) ? worn : null);
   useGame.getState().setDresserHats(makeDresserHats(seed));
+  useGame.getState().setLeaderboards(loadAllCompetitiveBoards(GAMES.map((g) => g.id)));
 }
 
 let socket: Socket | null = null;
@@ -31,7 +33,10 @@ export function connectRealm(token: string): Socket {
   sock.on("connect_error", (err) => useGame.getState().setNotice(err.message));
 
   sock.on("welcome", (payload) => {
-    useGame.getState().setWelcome(payload);
+    useGame.getState().setWelcome({
+      ...payload,
+      favorites: compactFavorites(payload.favorites),
+    });
     hydrateHats(payload.self.id, Date.now() >>> 0);
     voice.setSelf(payload.self.id);
     for (const player of payload.players as PlayerPublic[]) {

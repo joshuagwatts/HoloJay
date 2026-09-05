@@ -1,5 +1,14 @@
 import { create } from "zustand";
-import { CHECKPOINT_COUNT, type AuthUser, type Favorite, type FollowInvitePayload, type PlayerLocation, type PlayerPublic, type PortalAssignment } from "@holojay/shared";
+import {
+  CHECKPOINT_COUNT,
+  type AuthUser,
+  type Favorite,
+  type FollowInvitePayload,
+  type LeaderboardEntry,
+  type PlayerLocation,
+  type PlayerPublic,
+  type PortalAssignment,
+} from "@holojay/shared";
 
 export type NearbyPortal = {
   source: "path" | "favorite" | "return";
@@ -29,6 +38,7 @@ type GameStore = {
   nearbyHat: NearbyHat;
   wornHatId: string | null;
   dresserHats: string[];
+  leaderboards: Record<string, LeaderboardEntry[]>;
   pointerLocked: boolean;
   chatOpen: boolean;
   ptt: boolean;
@@ -62,6 +72,8 @@ type GameStore = {
   setNearbyHat: (nearbyHat: NearbyHat) => void;
   setWornHatId: (hatId: string | null) => void;
   setDresserHats: (hats: string[]) => void;
+  setLeaderboard: (gameId: string, entries: LeaderboardEntry[]) => void;
+  setLeaderboards: (boards: Record<string, LeaderboardEntry[]>) => void;
   setPointerLocked: (v: boolean) => void;
   setChatOpen: (v: boolean) => void;
   setPtt: (v: boolean) => void;
@@ -90,6 +102,7 @@ export const useGame = create<GameStore>((set, get) => ({
   nearbyHat: null,
   wornHatId: null,
   dresserHats: [],
+  leaderboards: {},
   pointerLocked: false,
   chatOpen: false,
   ptt: false,
@@ -115,6 +128,7 @@ export const useGame = create<GameStore>((set, get) => ({
       nearbyHat: null,
       wornHatId: null,
       dresserHats: [],
+      leaderboards: {},
       offline: false,
     }),
   setConnected: (connected) => set({ connected }),
@@ -162,6 +176,8 @@ export const useGame = create<GameStore>((set, get) => ({
   setNearbyHat: (nearbyHat) => set({ nearbyHat }),
   setWornHatId: (wornHatId) => set({ wornHatId }),
   setDresserHats: (dresserHats) => set({ dresserHats }),
+  setLeaderboard: (gameId, entries) => set({ leaderboards: { ...get().leaderboards, [gameId]: entries } }),
+  setLeaderboards: (leaderboards) => set({ leaderboards }),
   setPointerLocked: (pointerLocked) => set({ pointerLocked }),
   setChatOpen: (chatOpen) => set({ chatOpen }),
   setPtt: (ptt) => set({ ptt }),

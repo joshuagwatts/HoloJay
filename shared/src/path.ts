@@ -24,8 +24,9 @@ export function figure8Normal(t: number): Vec3 {
   return { x: -tangent.z, y: 0, z: tangent.x };
 }
 
-export function portalSlotPose(slot: number) {
-  const t = ((slot + 0.5) / PORTAL_COUNT) * Math.PI * 2;
+export function portalSlotPose(slot: number, total = PORTAL_COUNT) {
+  const n = Math.max(1, total);
+  const t = ((slot + 0.5) / n) * Math.PI * 2;
   const p = figure8Point(t);
   const tangent = figure8Tangent(t);
   const normal = figure8Normal(t);

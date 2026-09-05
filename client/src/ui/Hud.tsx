@@ -155,7 +155,13 @@ export function Hud() {
       ) : nearby && game ? (
         <div className="prompt">
           <p className="prompt-name">{game.name}</p>
-          <p className="prompt-tag">{nearby.source === "return" ? "Leave this chamber" : game.tagline}</p>
+          <p className="prompt-tag">
+            {nearby.source === "return"
+              ? "Leave this chamber"
+              : game.mode === "competitive"
+                ? `${game.tagline} · scored`
+                : game.tagline}
+          </p>
           <div className="prompt-actions">
             <button type="button" className="prompt-btn" onClick={playNearby}>
               {nearby.source === "return" ? "Return" : "Play"}

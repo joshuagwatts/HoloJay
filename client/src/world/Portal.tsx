@@ -2,7 +2,8 @@ import { Html } from "@react-three/drei";
 import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { gameById } from "@holojay/shared";
+import { gameById, isCompetitive } from "@holojay/shared";
+import { useGame } from "../state/store.ts";
 
 type PortalProps = {
   position: [number, number, number];
@@ -20,6 +21,7 @@ function shade(hex: string, amount: number) {
 
 export function Portal({ position, yaw, gameId, highlight, label }: PortalProps) {
   const game = gameById(gameId);
+  const board = useGame((s) => s.leaderboards[gameId] ?? []);
   const color = game?.color ?? "#88ccff";
   const body = useMemo(() => shade(color, -0.42), [color]);
   const bodyDark = useMemo(() => shade(color, -0.55), [color]);
@@ -27,6 +29,7 @@ export function Portal({ position, yaw, gameId, highlight, label }: PortalProps)
   const screen = useRef<THREE.Mesh>(null);
   const marquee = useRef<THREE.Mesh>(null);
   const seed = useMemo(() => Math.random() * Math.PI * 2, []);
+  const competitive = game ? isCompetitive(game.id) : false;
 
   useFrame((state) => {
     const t = state.clock.elapsedTime;
@@ -42,7 +45,6 @@ export function Portal({ position, yaw, gameId, highlight, label }: PortalProps)
 
   if (!game) return null;
 
-  // Control deck tilts DOWN toward the player (positive X): front edge lower than screen edge
   const deckTilt = 0.52;
 
   return (
@@ -81,13 +83,11 @@ export function Portal({ position, yaw, gameId, highlight, label }: PortalProps)
         <meshBasicMaterial color="#000000" transparent opacity={0.18} />
       </mesh>
 
-      {/* Sloped control panel — sits under the CRT, tips down toward the player */}
       <group position={[0, 1.02, 0.42]} rotation={[deckTilt, 0, 0]}>
         <mesh position={[0, 0, 0.32]}>
           <boxGeometry args={[1.42, 0.1, 0.7]} />
           <meshStandardMaterial color={bodyDark} roughness={0.45} metalness={0.2} />
         </mesh>
-        {/* Lip under the screen */}
         <mesh position={[0, 0.08, 0.02]}>
           <boxGeometry args={[1.35, 0.08, 0.08]} />
           <meshStandardMaterial color="#0e0c12" roughness={0.5} />
@@ -145,6 +145,25 @@ export function Portal({ position, yaw, gameId, highlight, label }: PortalProps)
           <span>{label ?? game.tagline}</span>
         </div>
       </Html>
+
+      {competitive ? (
+        <Html position={[0, 3.55, 0.15]} center distanceFactor={14} style={{ pointerEvents: "none" }}>
+          <div className={`cabinet-lb ${highlight ? "hot" : ""}`}>
+            <div className="cabinet-lb-title">Top runs</div>
+            {board.length === 0 ? (
+              <div className="cabinet-lb-empty">No scores yet</div>
+            ) : (
+              board.map((entry, i) => (
+                <div key={`${entry.username}-${entry.at}`} className="cabinet-lb-row">
+                  <b>{i + 1}</b>
+                  <span>{entry.username}</span>
+                  <em>{entry.score}m</em>
+                </div>
+              ))
+            )}
+          </div>
+        </Html>
+      ) : null}
     </group>
   );
 }

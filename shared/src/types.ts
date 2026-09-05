@@ -13,6 +13,14 @@ export type GameDef = {
   name: string;
   color: string;
   tagline: string;
+  /** Competitive games show a cabinet leaderboard; fun rooms do not. */
+  mode: "fun" | "competitive";
+};
+
+export type LeaderboardEntry = {
+  username: string;
+  score: number;
+  at: number;
 };
 
 export type AuthUser = {

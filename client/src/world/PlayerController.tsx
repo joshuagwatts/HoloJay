@@ -362,7 +362,7 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
       if (d < bestD) best = { source: "return", slot: 0, gameId: state.location.gameId };
     } else {
       for (const assignment of state.assignments) {
-        const pose = portalSlotPose(assignment.slot);
+        const pose = portalSlotPose(assignment.slot, state.assignments.length);
         const mid = { x: pose.position.x, y: 1.1, z: pose.position.z };
         const d = dist3(here, mid);
         if (d < bestD) {

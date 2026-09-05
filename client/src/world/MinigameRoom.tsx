@@ -3,11 +3,13 @@ import { useEffect } from "react";
 import { useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { gameById } from "@holojay/shared";
+import { emitLeave } from "../net/session.ts";
 import { useGame } from "../state/store.ts";
 import { Portal } from "./Portal.tsx";
 import { PlayerController } from "./PlayerController.tsx";
 import { RemoteOrbs } from "./RemoteOrbs.tsx";
 import { MagicShaderShell } from "./MagicRoomFx.tsx";
+import { InfiniteRunner } from "./InfiniteRunner.tsx";
 
 const ROOM_SPAWN: [number, number, number] = [0, 1.2, 4];
 
@@ -23,12 +25,39 @@ function MagicFogOff() {
   return null;
 }
 
+function RunnerExitKeys() {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (useGame.getState().chatOpen || e.repeat) return;
+      if (e.code === "KeyE") emitLeave();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  return null;
+}
+
 export function MinigameRoom() {
   const location = useGame((s) => s.location);
   const nearby = useGame((s) => s.nearby);
   if (location.type !== "game") return null;
   const game = gameById(location.gameId);
   if (!game) return null;
+
+  if (location.gameId === "lane-rush") {
+    return (
+      <group>
+        <RunnerExitKeys />
+        <InfiniteRunner color={game.color} />
+        <Html position={[0, -0.2, 6]} center style={{ pointerEvents: "none" }}>
+          <div className="arcade-label">
+            <strong>Return cabinet</strong>
+            <span>Press E or use Return in the HUD</span>
+          </div>
+        </Html>
+      </group>
+    );
+  }
 
   const isMagic = location.gameId === "magic-room";
 
@@ -69,7 +98,7 @@ export function MinigameRoom() {
           <pointLight position={[0, 6, 0]} color={game.color} intensity={20} distance={30} />
           <Html position={[0, 4.2, 0]} center style={{ pointerEvents: "none" }}>
             <div className="room-title">
-              <em>placeholder chamber</em>
+              <em>chamber</em>
               <strong>{game.name}</strong>
               <span>{game.tagline}</span>
             </div>
