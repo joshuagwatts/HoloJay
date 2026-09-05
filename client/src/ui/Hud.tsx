@@ -1,8 +1,22 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { CHECKPOINT_COUNT, gameById } from "@holojay/shared";
 import { clearToken } from "../auth/api.ts";
-import { disconnectRealm, emitChat, emitFollow, emitLeave } from "../net/session.ts";
+import { setPadAxis, setPadSprint } from "../inputPad.ts";
+import { disconnectRealm, emitChat, emitEnter, emitFollow, emitLeave, emitPin, emitUnpin } from "../net/session.ts";
 import { useGame } from "../state/store.ts";
+
+function holdAxis(axis: "forward" | "right" | "up", value: number) {
+  return {
+    onPointerDown: (e: ReactPointerEvent) => {
+      e.preventDefault();
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      setPadAxis(axis, value);
+    },
+    onPointerUp: () => setPadAxis(axis, 0),
+    onPointerCancel: () => setPadAxis(axis, 0),
+    onLostPointerCapture: () => setPadAxis(axis, 0),
+  };
+}
 
 export function Hud() {
   const user = useGame((s) => s.user);
@@ -21,6 +35,7 @@ export function Hud() {
   const favorites = useGame((s) => s.favorites);
   const players = useGame((s) => s.players);
   const [draft, setDraft] = useState("");
+  const [hintGone, setHintGone] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const progress = loopVisited.filter(Boolean).length;
@@ -46,6 +61,10 @@ export function Hud() {
     if (chatOpen) inputRef.current?.focus();
   }, [chatOpen]);
 
+  useEffect(() => {
+    if (pointerLocked) setHintGone(true);
+  }, [pointerLocked]);
+
   function sendChat(e: FormEvent) {
     e.preventDefault();
     const text = draft.trim();
@@ -58,6 +77,18 @@ export function Hud() {
     disconnectRealm();
     clearToken();
     useGame.getState().clearAuth();
+  }
+
+  function playNearby() {
+    if (!nearby) return;
+    if (nearby.source === "return") emitLeave();
+    else emitEnter(nearby.source, nearby.slot, nearby.gameId);
+  }
+
+  function pinNearby() {
+    if (!nearby || nearby.source === "return") return;
+    if (nearby.source === "favorite") emitUnpin(nearby.gameId);
+    else emitPin(nearby.gameId);
   }
 
   return (
@@ -90,8 +121,10 @@ export function Hud() {
         </b>
       </div>
 
-      {!pointerLocked && !chatOpen ? (
-        <div className="hint-center">Click to look around · hold RMB to orbit · scroll to zoom</div>
+      {!hintGone && !chatOpen ? (
+        <div className="hint-center">
+          Drag to look · scroll to zoom · use the pad to fly · tap a cabinet to play
+        </div>
       ) : null}
 
       {notice ? <div className="notice">{notice}</div> : null}
@@ -111,28 +144,53 @@ export function Hud() {
         <div className="prompt">
           <p className="prompt-name">{game.name}</p>
           <p className="prompt-tag">{nearby.source === "return" ? "Leave this chamber" : game.tagline}</p>
-          <p className="prompt-keys">
-            {nearby.source === "return" ? (
-              <kbd>E</kbd>
-            ) : (
-              <>
-                <kbd>E</kbd> play
-                {nearby.source === "favorite" ? (
-                  <>
-                    {" "}
-                    <kbd>F</kbd> unpin
-                  </>
-                ) : (
-                  <>
-                    {" "}
-                    <kbd>F</kbd> pin to plaza
-                  </>
-                )}
-              </>
-            )}
-          </p>
+          <div className="prompt-actions">
+            <button type="button" className="prompt-btn" onClick={playNearby}>
+              {nearby.source === "return" ? "Return" : "Play"}
+            </button>
+            {nearby.source !== "return" ? (
+              <button type="button" className="prompt-btn ghost" onClick={pinNearby}>
+                {nearby.source === "favorite" ? "Unpin" : "Pin"}
+              </button>
+            ) : null}
+          </div>
         </div>
       ) : null}
+
+      <div className="move-pad" aria-label="Movement pad">
+        <button type="button" className="pad-btn" {...holdAxis("up", 1)}>
+          Up
+        </button>
+        <button type="button" className="pad-btn" {...holdAxis("forward", 1)}>
+          ▲
+        </button>
+        <button type="button" className="pad-btn" {...holdAxis("up", -1)}>
+          Dn
+        </button>
+        <button type="button" className="pad-btn" {...holdAxis("right", -1)}>
+          ◀
+        </button>
+        <button type="button" className="pad-btn" {...holdAxis("forward", -1)}>
+          ▼
+        </button>
+        <button type="button" className="pad-btn" {...holdAxis("right", 1)}>
+          ▶
+        </button>
+        <button
+          type="button"
+          className="pad-btn sprint"
+          onPointerDown={(e) => {
+            e.preventDefault();
+            (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+            setPadSprint(true);
+          }}
+          onPointerUp={() => setPadSprint(false)}
+          onPointerCancel={() => setPadSprint(false)}
+          onLostPointerCapture={() => setPadSprint(false)}
+        >
+          Boost
+        </button>
+      </div>
 
       {chatOpen ? (
         <form className="chat" onSubmit={sendChat}>
@@ -147,14 +205,12 @@ export function Hud() {
       ) : null}
 
       <footer className="hud-bottom">
+        <span>Drag look · scroll zoom · pad / WASD fly</span>
         <span>
-          <kbd>WASD</kbd> fly with the camera <kbd>Space</kbd> up <kbd>Shift</kbd> down <kbd>Q</kbd> sprint
-        </span>
-        <span>
-          <kbd>E</kbd> play <kbd>F</kbd> favorite <kbd>T</kbd> chat
+          Click cabinet or <kbd>E</kbd> play · <kbd>C</kbd> sticky look
         </span>
         <span className={ptt ? "live" : ""}>
-          <kbd>V</kbd> talk {micReady ? (ptt ? "• live" : "• ready") : "• hold to enable mic"}
+          <kbd>V</kbd> talk {micReady ? (ptt ? "• live" : "• ready") : ""}
         </span>
         {location.type === "game" ? (
           <button type="button" className="text" onClick={() => emitLeave()}>

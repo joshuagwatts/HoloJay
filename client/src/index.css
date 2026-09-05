@@ -313,6 +313,62 @@ input:focus {
   margin-top: 10px;
 }
 
+.prompt-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.prompt-btn {
+  border: 0;
+  background: var(--cyan);
+  color: #041318;
+  font-weight: 600;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.prompt-btn.ghost {
+  background: transparent;
+  color: var(--brass);
+  border: 1px solid var(--line);
+}
+
+.move-pad {
+  pointer-events: auto;
+  position: absolute;
+  left: 22px;
+  bottom: 78px;
+  display: grid;
+  grid-template-columns: repeat(3, 48px);
+  grid-template-rows: repeat(3, 48px);
+  gap: 6px;
+  user-select: none;
+  touch-action: none;
+}
+
+.pad-btn {
+  border: 1px solid var(--line);
+  background: rgba(7, 6, 13, 0.72);
+  color: var(--paper);
+  cursor: pointer;
+  font-size: 14px;
+  border-radius: 8px;
+}
+
+.pad-btn:active {
+  background: rgba(124, 240, 255, 0.22);
+  border-color: var(--cyan);
+}
+
+.pad-btn.sprint {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--brass);
+}
+
 .invite {
   position: absolute;
   top: 92px;

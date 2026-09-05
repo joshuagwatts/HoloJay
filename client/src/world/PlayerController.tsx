@@ -12,6 +12,7 @@ import {
   favoriteSlotPose,
   portalSlotPose,
 } from "@holojay/shared";
+import { pad } from "../inputPad.ts";
 import { emitEnter, emitLeave, emitLoopComplete, emitMove, emitPin, emitUnpin } from "../net/session.ts";
 import { useGame } from "../state/store.ts";
 import { voice } from "../voice/proximity.ts";
@@ -25,6 +26,22 @@ const camPos = new THREE.Vector3();
 const lookAt = new THREE.Vector3();
 const desired = new THREE.Vector3();
 
+function tryInteract() {
+  const state = useGame.getState();
+  const near = state.nearby;
+  if (!near) return;
+  if (near.source === "return") emitLeave();
+  else emitEnter(near.source, near.slot, near.gameId);
+}
+
+function tryFavorite() {
+  const state = useGame.getState();
+  const near = state.nearby;
+  if (!near || near.source === "return") return;
+  if (near.source === "favorite") emitUnpin(near.gameId);
+  else emitPin(near.gameId);
+}
+
 export function PlayerController({ spawn }: { spawn: [number, number, number] }) {
   const group = useRef<THREE.Group>(null);
   const pos = useRef(new THREE.Vector3(...spawn));
@@ -34,6 +51,8 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
   const sendAcc = useRef(0);
   const loopSent = useRef(false);
   const dragging = useRef(false);
+  const dragButton = useRef(0);
+  const dragDist = useRef(0);
   const { camera, gl } = useThree();
   const user = useGame((s) => s.user);
   const location = useGame((s) => s.location);
@@ -54,9 +73,10 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
   useEffect(() => {
     const el = gl.domElement;
     const orbit = (dx: number, dy: number) => {
-      yaw.current -= dx * 0.0024;
-      pitch.current = Math.max(-1.15, Math.min(1.32, pitch.current - dy * 0.0021));
+      yaw.current -= dx * 0.003;
+      pitch.current = Math.max(-1.15, Math.min(1.32, pitch.current - dy * 0.0026));
     };
+
     const down = (e: KeyboardEvent) => {
       keys.add(e.code);
       const state = useGame.getState();
@@ -73,17 +93,11 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
           })
           .catch(() => useGame.getState().setNotice("Mic permission denied"));
       }
-      if (e.code === "KeyE") {
-        const near = state.nearby;
-        if (!near) return;
-        if (near.source === "return") emitLeave();
-        else emitEnter(near.source, near.slot, near.gameId);
-      }
-      if (e.code === "KeyF") {
-        const near = state.nearby;
-        if (!near || near.source === "return") return;
-        if (near.source === "favorite") emitUnpin(near.gameId);
-        else emitPin(near.gameId);
+      if (e.code === "KeyE") tryInteract();
+      if (e.code === "KeyF") tryFavorite();
+      if (e.code === "KeyC") {
+        if (document.pointerLockElement === el) document.exitPointerLock();
+        else void el.requestPointerLock();
       }
     };
     const upKey = (e: KeyboardEvent) => {
@@ -93,49 +107,64 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
         useGame.getState().setPtt(false);
       }
     };
-    const click = (e: MouseEvent) => {
-      if (useGame.getState().chatOpen) return;
-      if (e.button === 0) el.requestPointerLock();
-    };
+
     const pointerDown = (e: PointerEvent) => {
-      if (e.button === 2 && !useGame.getState().chatOpen) {
-        dragging.current = true;
-        el.setPointerCapture(e.pointerId);
-      }
+      if (useGame.getState().chatOpen) return;
+      if (e.button !== 0 && e.button !== 2) return;
+      dragging.current = true;
+      dragButton.current = e.button;
+      dragDist.current = 0;
+      el.setPointerCapture(e.pointerId);
+      useGame.getState().setPointerLocked(true);
     };
     const pointerUp = (e: PointerEvent) => {
-      if (e.button === 2) dragging.current = false;
-    };
-    const move = (e: MouseEvent) => {
-      if (useGame.getState().chatOpen) return;
-      if (document.pointerLockElement === el || dragging.current) {
-        orbit(e.movementX, e.movementY);
+      if (!dragging.current) return;
+      const wasDrag = dragDist.current > 8;
+      const button = dragButton.current;
+      dragging.current = false;
+      useGame.getState().setPointerLocked(false);
+      // Short left-click near a cabinet = play (mouse-friendly)
+      if (button === 0 && !wasDrag && !useGame.getState().chatOpen) {
+        tryInteract();
       }
+    };
+    const pointerMove = (e: PointerEvent) => {
+      if (useGame.getState().chatOpen) return;
+      if (document.pointerLockElement === el) {
+        orbit(e.movementX, e.movementY);
+        return;
+      }
+      if (!dragging.current) return;
+      dragDist.current += Math.abs(e.movementX) + Math.abs(e.movementY);
+      orbit(e.movementX, e.movementY);
     };
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
+      // Two-finger scroll / mouse wheel = zoom
       zoom.current = Math.max(3.4, Math.min(18, zoom.current + Math.sign(e.deltaY) * 0.7));
     };
-    const lock = () => useGame.getState().setPointerLocked(document.pointerLockElement === el);
+    const lock = () => {
+      // Only treat real pointer-lock as sticky look mode
+      if (document.pointerLockElement === el) useGame.getState().setPointerLocked(true);
+    };
     const blockMenu = (e: Event) => e.preventDefault();
+
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", upKey);
-    el.addEventListener("click", click);
     el.addEventListener("pointerdown", pointerDown);
     el.addEventListener("pointerup", pointerUp);
     el.addEventListener("pointercancel", pointerUp);
-    document.addEventListener("mousemove", move);
+    el.addEventListener("pointermove", pointerMove);
     el.addEventListener("wheel", wheel, { passive: false });
     document.addEventListener("pointerlockchange", lock);
     el.addEventListener("contextmenu", blockMenu);
     return () => {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", upKey);
-      el.removeEventListener("click", click);
       el.removeEventListener("pointerdown", pointerDown);
       el.removeEventListener("pointerup", pointerUp);
       el.removeEventListener("pointercancel", pointerUp);
-      document.removeEventListener("mousemove", move);
+      el.removeEventListener("pointermove", pointerMove);
       el.removeEventListener("wheel", wheel);
       document.removeEventListener("pointerlockchange", lock);
       el.removeEventListener("contextmenu", blockMenu);
@@ -157,14 +186,26 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
     }
 
     const chatBlock = state.chatOpen;
-    const moveSpeed = keys.has("KeyQ") ? 22 : 14;
+    const sprint = keys.has("KeyQ") || pad.sprint;
+    const moveSpeed = sprint ? 22 : 14;
     if (!chatBlock) {
-      if (keys.has("KeyW") || keys.has("ArrowUp")) pos.current.addScaledVector(fwd, moveSpeed * dt);
-      if (keys.has("KeyS") || keys.has("ArrowDown")) pos.current.addScaledVector(fwd, -moveSpeed * dt);
-      if (keys.has("KeyD") || keys.has("ArrowRight")) pos.current.addScaledVector(right, moveSpeed * dt);
-      if (keys.has("KeyA") || keys.has("ArrowLeft")) pos.current.addScaledVector(right, -moveSpeed * dt);
-      if (keys.has("Space")) pos.current.y += 9 * dt;
-      if (keys.has("ShiftLeft") || keys.has("ShiftRight")) pos.current.y -= 9 * dt;
+      let f = pad.forward;
+      let r = pad.right;
+      let u = pad.up;
+      if (keys.has("KeyW") || keys.has("ArrowUp")) f += 1;
+      if (keys.has("KeyS") || keys.has("ArrowDown")) f -= 1;
+      if (keys.has("KeyD") || keys.has("ArrowRight")) r += 1;
+      if (keys.has("KeyA") || keys.has("ArrowLeft")) r -= 1;
+      if (keys.has("Space")) u += 1;
+      if (keys.has("ShiftLeft") || keys.has("ShiftRight")) u -= 1;
+      f = Math.max(-1, Math.min(1, f));
+      r = Math.max(-1, Math.min(1, r));
+      u = Math.max(-1, Math.min(1, u));
+      if (f || r || u) {
+        pos.current.addScaledVector(fwd, f * moveSpeed * dt);
+        pos.current.addScaledVector(right, r * moveSpeed * dt);
+        pos.current.y += u * 9 * dt;
+      }
     }
     pos.current.y = Math.max(0.5, Math.min(22, pos.current.y));
     const radial = Math.hypot(pos.current.x, pos.current.z);
@@ -229,7 +270,8 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
     } else {
       for (const assignment of state.assignments) {
         const pose = portalSlotPose(assignment.slot);
-        const d = dist3(here, pose.position);
+        const mid = { x: pose.position.x, y: 1.1, z: pose.position.z };
+        const d = dist3(here, mid);
         if (d < bestD) {
           bestD = d;
           best = { source: "path", slot: assignment.slot, gameId: assignment.gameId };
@@ -237,7 +279,8 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
       }
       for (const fav of state.favorites) {
         const pose = favoriteSlotPose(fav.slot);
-        const d = dist3(here, pose.position);
+        const mid = { x: pose.position.x, y: 1.1, z: pose.position.z };
+        const d = dist3(here, mid);
         if (d < bestD) {
           bestD = d;
           best = { source: "favorite", slot: fav.slot, gameId: fav.gameId };
