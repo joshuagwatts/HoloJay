@@ -199,9 +199,9 @@ export function Hud() {
       ) : null}
 
       <footer className="hud-bottom">
-        <span>Mouse look · scroll zoom · pad / WASD fly</span>
+        <span>Mouse / trackpad look · scroll zoom · pad / WASD fly</span>
         <span>
-          <kbd>E</kbd> / Play button · <kbd>Esc</kbd> free mouse
+          <kbd>E</kbd> play · <kbd>[</kbd><kbd>]</kbd> look sens · <kbd>Esc</kbd> free mouse
         </span>
         <span className={ptt ? "live" : ""}>
           <kbd>V</kbd> talk {micReady ? (ptt ? "• live" : "• ready") : ""}

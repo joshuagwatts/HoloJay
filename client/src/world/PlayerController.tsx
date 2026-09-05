@@ -26,11 +26,25 @@ const camPos = new THREE.Vector3();
 const lookAt = new THREE.Vector3();
 const desired = new THREE.Vector3();
 const FLOOR_CAM_Y = 0.4;
+const LOOK_SENS_KEY = "holojay.lookSens";
 
 function minPitchForFloor(orbY: number, zoomDist: number) {
   const pivotY = orbY + 0.55;
   const minSin = (FLOOR_CAM_Y - pivotY) / Math.max(zoomDist, 0.01);
   return Math.asin(Math.max(-0.999, Math.min(0.999, minSin)));
+}
+
+/** Amplify tiny trackpad ticks without making big mouse flicks wild. */
+function scaleLookDelta(d: number) {
+  const a = Math.abs(d);
+  if (a < 0.01) return 0;
+  const gain = a <= 1.5 ? 2.8 : a <= 4 ? 2.1 : a <= 10 ? 1.35 : 1.05;
+  return Math.sign(d) * a * gain;
+}
+
+function loadLookSens() {
+  const n = Number(localStorage.getItem(LOOK_SENS_KEY));
+  return Number.isFinite(n) && n > 0 ? Math.min(3, Math.max(0.35, n)) : 1;
 }
 
 function tryInteract() {
@@ -57,6 +71,9 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
   const zoom = useRef(8.2);
   const sendAcc = useRef(0);
   const loopSent = useRef(false);
+  const lookQueueX = useRef(0);
+  const lookQueueY = useRef(0);
+  const lookSens = useRef(loadLookSens());
   const { camera, gl } = useThree();
   const user = useGame((s) => s.user);
   const location = useGame((s) => s.location);
@@ -76,13 +93,6 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
 
   useEffect(() => {
     const el = gl.domElement;
-    const look = (dx: number, dy: number) => {
-      yaw.current -= dx * 0.0022;
-      const next = pitch.current - dy * 0.0018;
-      const floorPitch = minPitchForFloor(pos.current.y, zoom.current);
-      pitch.current = Math.max(floorPitch, Math.min(1.32, next));
-    };
-
     const down = (e: KeyboardEvent) => {
       keys.add(e.code);
       const state = useGame.getState();
@@ -101,6 +111,22 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
       }
       if (e.code === "KeyE") tryInteract();
       if (e.code === "KeyF") tryFavorite();
+      if (e.code === "BracketLeft" || e.code === "Minus") {
+        lookSens.current = Math.max(0.35, lookSens.current - 0.15);
+        localStorage.setItem(LOOK_SENS_KEY, String(lookSens.current));
+        useGame.getState().setNotice(`Look sens ${lookSens.current.toFixed(2)}`);
+        window.setTimeout(() => {
+          if (useGame.getState().notice?.startsWith("Look sens")) useGame.getState().setNotice(null);
+        }, 1400);
+      }
+      if (e.code === "BracketRight" || e.code === "Equal") {
+        lookSens.current = Math.min(3, lookSens.current + 0.15);
+        localStorage.setItem(LOOK_SENS_KEY, String(lookSens.current));
+        useGame.getState().setNotice(`Look sens ${lookSens.current.toFixed(2)}`);
+        window.setTimeout(() => {
+          if (useGame.getState().notice?.startsWith("Look sens")) useGame.getState().setNotice(null);
+        }, 1400);
+      }
       if (e.code === "Escape" && document.pointerLockElement === el) {
         document.exitPointerLock();
       }
@@ -120,14 +146,22 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
     const mouseMove = (e: MouseEvent) => {
       if (useGame.getState().chatOpen) return;
       if (document.pointerLockElement !== el) return;
-      look(e.movementX, e.movementY);
+      // Queue deltas so trackpad micro-moves accumulate smoothly per frame
+      lookQueueX.current += scaleLookDelta(e.movementX);
+      lookQueueY.current += scaleLookDelta(e.movementY);
     };
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
-      zoom.current = Math.max(3.4, Math.min(18, zoom.current + Math.sign(e.deltaY) * 0.7));
+      // Trackpads often send pixel deltas — scale by magnitude, not just sign
+      const step = Math.abs(e.deltaY) > 40 ? Math.sign(e.deltaY) * 0.85 : e.deltaY * 0.02;
+      zoom.current = Math.max(3.4, Math.min(18, zoom.current + step));
     };
     const lockChange = () => {
       useGame.getState().setPointerLocked(document.pointerLockElement === el);
+      if (document.pointerLockElement !== el) {
+        lookQueueX.current = 0;
+        lookQueueY.current = 0;
+      }
     };
     const blockMenu = (e: Event) => e.preventDefault();
 
@@ -154,6 +188,21 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
     const state = useGame.getState();
     const g = group.current;
     if (!g) return;
+
+    // Smooth look apply — helps choppy trackpad reports
+    const lx = lookQueueX.current;
+    const ly = lookQueueY.current;
+    lookQueueX.current *= 0.28;
+    lookQueueY.current *= 0.28;
+    if (Math.abs(lookQueueX.current) < 0.01) lookQueueX.current = 0;
+    if (Math.abs(lookQueueY.current) < 0.01) lookQueueY.current = 0;
+    if (lx || ly) {
+      const sens = lookSens.current;
+      yaw.current -= lx * 0.0024 * sens;
+      const next = pitch.current - ly * 0.002 * sens;
+      const floorPitch = minPitchForFloor(pos.current.y, zoom.current);
+      pitch.current = Math.max(floorPitch, Math.min(1.32, next));
+    }
 
     camera.getWorldDirection(fwd);
     right.crossVectors(fwd, up);
