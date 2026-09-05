@@ -162,6 +162,8 @@ export function SkyEscort({ color }: { color: string }) {
   const [hudDist, setHudDist] = useState(0);
   const [failCue, setFailCue] = useState(false);
   const failCueT = useRef(0);
+  const [clearBanner, setClearBanner] = useState<string | null>(null);
+  const clearBannerT = useRef(0);
 
   const phaseRef = useRef<Phase>("ready");
   const seatRef = useRef<Role>("driver");
@@ -385,6 +387,7 @@ export function SkyEscort({ color }: { color: string }) {
     shakeRef.current = 0;
     failCueT.current = 0;
     setFailCue(false);
+    // keep clearBanner so the "cleared" toast can show into the next run
     snapSeatCam(asRole);
     setPhaseBoth("run");
   }
@@ -577,6 +580,10 @@ export function SkyEscort({ color }: { color: string }) {
     if (failCueT.current > 0) {
       failCueT.current = Math.max(0, failCueT.current - clamped);
       if (failCueT.current <= 0) setFailCue(false);
+    }
+    if (clearBannerT.current > 0) {
+      clearBannerT.current = Math.max(0, clearBannerT.current - clamped);
+      if (clearBannerT.current <= 0) setClearBanner(null);
     }
 
     if (phaseRef.current === "run" && seatRef.current === "driver" && !isHost) {
@@ -805,15 +812,20 @@ export function SkyEscort({ color }: { color: string }) {
       for (const bl of blasts.current) bl.age += clamped;
       blasts.current = blasts.current.filter((b) => b.age < 0.55);
 
-      // Reach the finish pad — stop cleanly so we don't clip into the gate / fall off the far edge.
-      if (z.current <= level.endZ + level.tile * 0.35) {
-        z.current = level.endZ;
-        speed.current = 0;
-        falling.current = false;
-        y.current = 0.85;
-        keys.current.throttle = 0;
-        keys.current.steer = 0;
-        if (phaseRef.current === "run") setPhaseBoth("won");
+      // Gate reached — auto-roll into the next level (no Space required).
+      if (phaseRef.current === "run" && z.current <= level.endZ + level.tile * 0.35) {
+        const cleared = level.name;
+        const next = levelIdxRef.current + 1;
+        resetRun(seatRef.current, next);
+        clearBannerT.current = 2.2;
+        setClearBanner(`${cleared} cleared — ${makeLevel(next).name}`);
+        emitMinigame(instanceId, "sky-escort", {
+          type: "role",
+          driverId: driverIdRef.current,
+          gunnerId: gunnerIdRef.current,
+          phase: "run",
+          levelId: makeLevel(next).id,
+        } satisfies RoleMsg);
       }
 
       snapAcc.current += clamped;
@@ -1096,7 +1108,7 @@ export function SkyEscort({ color }: { color: string }) {
                   {seat === "driver" ? "DRIVER" : "GUNNER"} · hull {"♥".repeat(hull)}
                   {"♡".repeat(Math.max(0, level.hull - hull))} · {hudDist}m to gate
                 </p>
-                {failCue ? <p className="sky-escort-alert">METEOR IMPACT</p> : null}
+                {clearBanner ? <p className="sky-escort-alert">{clearBanner}</p> : failCue ? <p className="sky-escort-alert">METEOR IMPACT</p> : null}
                 <p className="sky-escort-hint">
                   {seat === "driver" ? "WASD trek · dodge meteor craters" : "Mouse aim · click / Space fire"}
                 </p>
@@ -1104,7 +1116,7 @@ export function SkyEscort({ color }: { color: string }) {
             )}
             {phase === "won" && (
               <p className="sky-escort-alert">
-                {`Gate secured — Space for ${makeLevel(levelIdx + 1).name}`}
+                {`Gate secured — rolling into ${makeLevel(levelIdx + 1).name}`}
               </p>
             )}
             {phase === "dead" && <p>Buggy cooked — Space to retry</p>}
