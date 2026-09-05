@@ -29,27 +29,38 @@ function localMode(): boolean {
   return useGame.getState().offline || !hasMultiplayerHub();
 }
 
+/**
+ * Enter the plaza. With no hub URL (GitHub Pages default) this is always solo.
+ * With a hub URL we try multiplayer, and only fall back to solo if the socket never welcomes.
+ */
 export function connectSession(token: string, user: AuthUser): void {
   disconnectRealm();
   useGame.getState().setLocation({ type: "hub" });
 
-  // Solo when no hub URL is configured (typical GitHub Pages until you add one)
-  if (token.startsWith("local.") || !hasMultiplayerHub()) {
+  const wantMulti = hasMultiplayerHub() && !token.startsWith("local.");
+
+  if (!wantMulti) {
     startLocal(user);
     return;
   }
 
-  useGame.getState().setHubReady(false);
   useGame.getState().setOffline(false);
+  // Keep hubReady true from a prior solo session so we don't blank the UI while linking
   connectRealm(token);
 
-  // If the hub never welcomes us, fall back to solo so refresh isn't a black hole
   window.setTimeout(() => {
-    if (!useGame.getState().hubReady && useGame.getState().token === token) {
-      useGame.getState().setNotice("Hub offline — playing solo");
-      startLocal(user);
-    }
-  }, 2800);
+    const state = useGame.getState();
+    if (state.token !== token) return;
+    if (state.connected && state.hubReady && !state.offline) return;
+    // Hub never came up — seamless solo, no boot-screen trap
+    startLocal(user);
+    state.setNotice("Playing solo (hub unreachable)");
+    window.setTimeout(() => {
+      if (useGame.getState().notice?.startsWith("Playing solo")) {
+        useGame.getState().setNotice(null);
+      }
+    }, 2800);
+  }, 3200);
 }
 
 export function emitMove(position: { x: number; y: number; z: number }, rotY: number): void {
