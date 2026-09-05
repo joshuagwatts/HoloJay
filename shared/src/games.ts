@@ -16,6 +16,13 @@ export const GAMES: GameDef[] = [
     tagline: "Dodge forever — high score wins",
     mode: "competitive",
   },
+  {
+    id: "sky-escort",
+    name: "Sky Escort",
+    color: "#ff7043",
+    tagline: "Last road out — cover the run",
+    mode: "fun",
+  },
 ];
 
 export function gameById(id: string): GameDef | undefined {

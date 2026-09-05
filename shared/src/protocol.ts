@@ -33,6 +33,13 @@ export type VoiceSignal = {
   data: unknown;
 };
 
+export type MinigamePayload = {
+  instanceId: string;
+  gameId: string;
+  fromId: string;
+  payload: unknown;
+};
+
 export type ClientToServer = {
   move: { position: Vec3; rotY: number };
   chat: { text: string };
@@ -44,6 +51,7 @@ export type ClientToServer = {
   follow: { instanceId: string };
   speaking: { active: boolean };
   "voice:signal": { toId: string; data: unknown };
+  minigame: { instanceId: string; gameId: string; payload: unknown };
 };
 
 export type ServerToClient = {
@@ -59,6 +67,7 @@ export type ServerToClient = {
   entered: { location: PlayerLocation };
   error: { message: string };
   "voice:signal": VoiceSignal;
+  minigame: MinigamePayload;
 };
 
 export type AuthResponse = {

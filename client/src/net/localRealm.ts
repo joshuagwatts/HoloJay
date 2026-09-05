@@ -158,6 +158,8 @@ export function localEnter(source: "path" | "favorite", slot: number, gameId: st
   state.setLocation({ type: "game", gameId, instanceId: `local:${gameId}` });
   if (gameId === "lane-rush") {
     state.setNotice("Lane Rush — Enter to start · Return in HUD to leave");
+  } else if (gameId === "sky-escort") {
+    state.setNotice("Sky Escort — pick a seat · Return in HUD to leave");
   } else {
     state.setNotice("Hold E at the return door to leave");
   }

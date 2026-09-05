@@ -9,6 +9,7 @@ import { PlayerController } from "./PlayerController.tsx";
 import { RemoteOrbs } from "./RemoteOrbs.tsx";
 import { MagicShaderShell } from "./MagicRoomFx.tsx";
 import { InfiniteRunner } from "./InfiniteRunner.tsx";
+import { SkyEscort } from "./SkyEscort.tsx";
 
 const ROOM_SPAWN: [number, number, number] = [0, 1.2, 4];
 
@@ -39,6 +40,20 @@ export function MinigameRoom() {
           <div className="arcade-label">
             <strong>Leave anytime</strong>
             <span>Use Return in the HUD (not E)</span>
+          </div>
+        </Html>
+      </group>
+    );
+  }
+
+  if (location.gameId === "sky-escort") {
+    return (
+      <group>
+        <SkyEscort color={game.color} />
+        <Html position={[0, 0.8, 16]} center style={{ pointerEvents: "none" }}>
+          <div className="arcade-label">
+            <strong>Leave anytime</strong>
+            <span>Use Return in the HUD</span>
           </div>
         </Html>
       </group>

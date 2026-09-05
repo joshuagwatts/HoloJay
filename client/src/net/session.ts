@@ -18,9 +18,11 @@ import {
   emitFollow as remoteFollow,
   emitLeave as remoteLeave,
   emitLoopComplete as remoteLoop,
+  emitMinigame as remoteMinigame,
   emitMove as remoteMove,
   emitPin as remotePin,
   emitUnpin as remoteUnpin,
+  onMinigame as remoteOnMinigame,
 } from "./socket.ts";
 
 export { disconnectRealm, startLocal, loadRuntimeConfig, hasMultiplayerHub };
@@ -90,4 +92,15 @@ export function emitLeave(): void {
 
 export function emitFollow(instanceId: string): void {
   if (!localMode()) remoteFollow(instanceId);
+}
+
+export function emitMinigame(instanceId: string, gameId: string, payload: unknown): void {
+  if (!localMode()) remoteMinigame(instanceId, gameId, payload);
+}
+
+export function onMinigame(
+  handler: (msg: { instanceId: string; gameId: string; fromId: string; payload: unknown }) => void,
+): () => void {
+  if (localMode()) return () => undefined;
+  return remoteOnMinigame(handler);
 }

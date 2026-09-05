@@ -302,6 +302,21 @@ export function attachRealm(io: Server): void {
       io.to(targetSocketId).emit("voice:signal", { fromId: user.id, data: payload.data });
     });
 
+    socket.on("minigame", (payload: { instanceId?: string; gameId?: string; payload?: unknown }) => {
+      const instanceId = String(payload?.instanceId ?? "");
+      const gameId = String(payload?.gameId ?? "");
+      if (!instanceId || !gameId) return;
+      if (session.location.type !== "game") return;
+      if (session.location.instanceId !== instanceId || session.location.gameId !== gameId) return;
+      const msg = { instanceId, gameId, fromId: user.id, payload: payload.payload };
+      for (const other of sessions.values()) {
+        if (other.user.id === user.id) continue;
+        if (other.location.type !== "game") continue;
+        if (other.location.instanceId !== instanceId || other.location.gameId !== gameId) continue;
+        other.socket.emit("minigame", msg);
+      }
+    });
+
     socket.on("disconnect", () => {
       sessions.delete(socket.id);
       if (byUserId.get(user.id) === socket.id) byUserId.delete(user.id);

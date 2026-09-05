@@ -94,7 +94,13 @@ export function connectRealm(token: string): Socket {
   sock.on("entered", ({ location }) => {
     useGame.getState().setLocation(location);
     if (location.type === "game") {
-      useGame.getState().setNotice("Hold E at the return door to leave");
+      if (location.gameId === "sky-escort") {
+        useGame.getState().setNotice("Sky Escort — pick a seat · Return in HUD to leave");
+      } else if (location.gameId === "lane-rush") {
+        useGame.getState().setNotice("Lane Rush — Enter to start · Return in HUD to leave");
+      } else {
+        useGame.getState().setNotice("Hold E at the return door to leave");
+      }
     }
   });
 
@@ -149,4 +155,17 @@ export function emitLeave(): void {
 
 export function emitFollow(instanceId: string): void {
   socket?.emit("follow", { instanceId });
+}
+
+export function emitMinigame(instanceId: string, gameId: string, payload: unknown): void {
+  socket?.emit("minigame", { instanceId, gameId, payload });
+}
+
+export function onMinigame(handler: (msg: { instanceId: string; gameId: string; fromId: string; payload: unknown }) => void): () => void {
+  if (!socket) return () => undefined;
+  const sock = socket;
+  sock.on("minigame", handler);
+  return () => {
+    sock.off("minigame", handler);
+  };
 }
