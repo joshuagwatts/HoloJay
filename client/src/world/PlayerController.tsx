@@ -25,6 +25,13 @@ const right = new THREE.Vector3();
 const camPos = new THREE.Vector3();
 const lookAt = new THREE.Vector3();
 const desired = new THREE.Vector3();
+const FLOOR_CAM_Y = 0.4;
+
+function minPitchForFloor(orbY: number, zoomDist: number) {
+  const pivotY = orbY + 0.55;
+  const minSin = (FLOOR_CAM_Y - pivotY) / Math.max(zoomDist, 0.01);
+  return Math.asin(Math.max(-0.999, Math.min(0.999, minSin)));
+}
 
 function tryInteract() {
   const state = useGame.getState();
@@ -74,7 +81,9 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
     const el = gl.domElement;
     const orbit = (dx: number, dy: number) => {
       yaw.current -= dx * 0.003;
-      pitch.current = Math.max(-1.15, Math.min(1.32, pitch.current - dy * 0.0026));
+      const next = pitch.current - dy * 0.0026;
+      const floorPitch = minPitchForFloor(pos.current.y, zoom.current);
+      pitch.current = Math.max(floorPitch, Math.min(1.32, next));
     };
 
     const down = (e: KeyboardEvent) => {
@@ -219,6 +228,9 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
     g.position.copy(pos.current);
     g.rotation.y = Math.atan2(fwd.x, fwd.z);
 
+    // Keep orbit above the floor as height / zoom change
+    pitch.current = Math.max(minPitchForFloor(pos.current.y, zoom.current), Math.min(1.32, pitch.current));
+
     const cp = Math.cos(pitch.current);
     camPos.set(
       pos.current.x + Math.sin(yaw.current) * cp * zoom.current,
@@ -226,7 +238,9 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
       pos.current.z + Math.cos(yaw.current) * cp * zoom.current,
     );
     desired.copy(camPos);
+    desired.y = Math.max(FLOOR_CAM_Y, desired.y);
     camera.position.lerp(desired, 1 - Math.exp(-10 * dt));
+    camera.position.y = Math.max(FLOOR_CAM_Y, camera.position.y);
     lookAt.set(pos.current.x, pos.current.y + 0.25, pos.current.z);
     camera.lookAt(lookAt);
 
