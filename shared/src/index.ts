@@ -3,3 +3,4 @@ export * from "./games.ts";
 export * from "./path.ts";
 export * from "./protocol.ts";
 export * from "./realmLogic.ts";
+export * from "./hats.ts";

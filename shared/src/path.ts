@@ -54,6 +54,31 @@ export function favoriteSlotPose(slot: number, total = MAX_FAVORITES) {
   };
 }
 
+/** Dresser sits just off the plaza, facing inward. */
+export function dresserPose() {
+  return {
+    position: { x: -10.5, y: 0, z: 2.2 },
+    yaw: Math.PI * 0.5,
+  };
+}
+
+/** World pose for a hat on the dresser top (matches HatDresser local layout). */
+export function dresserHatSlotPose(slot: number, total = 5) {
+  const dresser = dresserPose();
+  const localX = (slot - (total - 1) / 2) * 0.58;
+  const localZ = 0.15;
+  const cy = Math.cos(dresser.yaw);
+  const sy = Math.sin(dresser.yaw);
+  return {
+    position: {
+      x: dresser.position.x + localX * cy + localZ * sy,
+      y: 1.28,
+      z: dresser.position.z - localX * sy + localZ * cy,
+    },
+    yaw: dresser.yaw + Math.PI,
+  };
+}
+
 export function checkpointPose(index: number) {
   const t = (index / CHECKPOINT_COUNT) * Math.PI * 2;
   return { t, position: figure8Point(t) };

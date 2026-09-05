@@ -1,9 +1,16 @@
 import { io, type Socket } from "socket.io-client";
-import type { PlayerPublic } from "@holojay/shared";
+import { hatById, makeDresserHats, type PlayerPublic } from "@holojay/shared";
 import { useGame } from "../state/store.ts";
 import { voice } from "../voice/proximity.ts";
 
 const SOCKET_URL = import.meta.env.VITE_SERVER_URL || (import.meta.env.DEV ? "http://127.0.0.1:3001" : "");
+const hatKey = (id: string) => `holojay.hat.${id}`;
+
+function hydrateHats(userId: string, seed: number) {
+  const worn = localStorage.getItem(hatKey(userId));
+  useGame.getState().setWornHatId(worn && hatById(worn) ? worn : null);
+  useGame.getState().setDresserHats(makeDresserHats(seed));
+}
 
 let socket: Socket | null = null;
 
@@ -25,6 +32,7 @@ export function connectRealm(token: string): Socket {
 
   sock.on("welcome", (payload) => {
     useGame.getState().setWelcome(payload);
+    hydrateHats(payload.self.id, Date.now() >>> 0);
     voice.setSelf(payload.self.id);
     for (const player of payload.players as PlayerPublic[]) {
       void voice.ensurePeer(player.id);
@@ -55,7 +63,8 @@ export function connectRealm(token: string): Socket {
 
   sock.on("assignments", ({ assignments }) => {
     useGame.getState().setAssignments(assignments);
-    useGame.getState().setNotice("Loop complete — outer doors reshuffled");
+    useGame.getState().setDresserHats(makeDresserHats((Date.now() ^ (Math.random() * 0xffff)) >>> 0));
+    useGame.getState().setNotice("Loop complete — cabinets & hats reshuffled");
     window.setTimeout(() => {
       if (useGame.getState().notice?.startsWith("Loop complete")) {
         useGame.getState().setNotice(null);

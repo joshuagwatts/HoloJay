@@ -2,7 +2,9 @@ import {
   canPin,
   compactFavorites,
   gameById,
+  hatById,
   makeAssignments,
+  makeDresserHats,
   type AuthUser,
   type Favorite,
 } from "@holojay/shared";
@@ -10,6 +12,7 @@ import { useGame } from "../state/store.ts";
 
 const favKey = (id: string) => `holojay.favorites.${id}`;
 const seedKey = (id: string) => `holojay.seed.${id}`;
+const hatKey = (id: string) => `holojay.hat.${id}`;
 
 function loadFavorites(userId: string): Favorite[] {
   try {
@@ -36,6 +39,35 @@ function saveSeed(userId: string, seed: number): void {
   localStorage.setItem(seedKey(userId), String(seed));
 }
 
+function loadWornHat(userId: string): string | null {
+  const id = localStorage.getItem(hatKey(userId));
+  return id && hatById(id) ? id : null;
+}
+
+export function saveWornHat(userId: string, hatId: string | null): void {
+  if (hatId) localStorage.setItem(hatKey(userId), hatId);
+  else localStorage.removeItem(hatKey(userId));
+}
+
+export function applyDresserHats(seed: number): void {
+  useGame.getState().setDresserHats(makeDresserHats(seed));
+}
+
+export function wearHat(hatId: string | null): void {
+  const state = useGame.getState();
+  if (!state.selfId) return;
+  if (hatId && !hatById(hatId)) return;
+  const next = state.wornHatId === hatId ? null : hatId;
+  state.setWornHatId(next);
+  saveWornHat(state.selfId, next);
+  const name = next ? hatById(next)?.name : null;
+  state.setNotice(name ? `Wearing ${name}` : "Hat removed");
+  window.setTimeout(() => {
+    const n = useGame.getState().notice;
+    if (n?.startsWith("Wearing") || n === "Hat removed") useGame.getState().setNotice(null);
+  }, 1800);
+}
+
 export function startLocal(user: AuthUser): void {
   const favorites = loadFavorites(user.id);
   const seed = loadSeed(user.id);
@@ -58,6 +90,8 @@ export function startLocal(user: AuthUser): void {
     ),
     favorites,
   });
+  useGame.getState().setWornHatId(loadWornHat(user.id));
+  applyDresserHats(seed);
 }
 
 export function localPin(gameId: string): void {
@@ -92,7 +126,8 @@ export function localLoopComplete(): void {
     state.favorites.map((f) => f.gameId),
   );
   state.setAssignments(assignments);
-  state.setNotice("Loop complete — outer doors reshuffled");
+  applyDresserHats(seed);
+  state.setNotice("Loop complete — cabinets & hats reshuffled");
   window.setTimeout(() => {
     if (useGame.getState().notice?.startsWith("Loop complete")) useGame.getState().setNotice(null);
   }, 3200);

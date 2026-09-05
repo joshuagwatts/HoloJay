@@ -9,14 +9,18 @@ import {
   checkpointPose,
   dist3,
   distXZ,
+  dresserHatSlotPose,
   favoriteSlotPose,
   portalSlotPose,
 } from "@holojay/shared";
 import { isPadMoving, pad, setOnPadRelease } from "../inputPad.ts";
+import { wearHat } from "../net/localRealm.ts";
 import { emitEnter, emitLeave, emitLoopComplete, emitMove, emitPin, emitUnpin } from "../net/session.ts";
 import { useGame } from "../state/store.ts";
 import { voice } from "../voice/proximity.ts";
 import { Orb } from "./Orb.tsx";
+
+const HAT_INTERACT_RANGE = 2.4;
 
 const keys = new Set<string>();
 const MOVE_KEYS = new Set([
@@ -70,6 +74,10 @@ function isKeyboardMoving() {
 
 function tryInteract() {
   const state = useGame.getState();
+  if (state.nearbyHat) {
+    wearHat(state.nearbyHat.hatId);
+    return;
+  }
   const near = state.nearby;
   if (!near) return;
   if (near.source === "return") emitLeave();
@@ -102,6 +110,8 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
   const lastChat = useGame((s) => s.lastChat);
   const selfId = useGame((s) => s.selfId);
   const ptt = useGame((s) => s.ptt);
+  const wornHatId = useGame((s) => s.wornHatId);
+  const inMagic = location.type === "game" && location.gameId === "magic-room";
 
   useEffect(() => {
     pos.current.set(...spawn);
@@ -285,7 +295,7 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
     }
     pos.current.y = Math.max(0.5, Math.min(22, pos.current.y));
     const radial = Math.hypot(pos.current.x, pos.current.z);
-    const maxR = state.location.type === "hub" ? 72 : 12;
+    const maxR = state.location.type === "hub" ? 72 : state.location.gameId === "magic-room" ? 16 : 12;
     if (radial > maxR) {
       const s = maxR / radial;
       pos.current.x *= s;
@@ -344,6 +354,8 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
 
     let best: typeof state.nearby = null;
     let bestD = PORTAL_INTERACT_RANGE;
+    let bestHat: typeof state.nearbyHat = null;
+    let bestHatD = HAT_INTERACT_RANGE;
     if (state.location.type === "game") {
       const door = { x: 0, y: 1.1, z: -8 };
       const d = dist3(here, door);
@@ -367,12 +379,27 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
           best = { source: "favorite", slot: fav.slot, gameId: fav.gameId };
         }
       }
+      const total = state.dresserHats.length;
+      for (let slot = 0; slot < total; slot += 1) {
+        const hatId = state.dresserHats[slot];
+        const pose = dresserHatSlotPose(slot, total);
+        const d = dist3(here, pose.position);
+        if (d < bestHatD) {
+          bestHatD = d;
+          bestHat = { hatId, slot };
+        }
+      }
     }
     const cur = state.nearby;
     const sameNear =
       (!cur && !best) ||
       (cur && best && cur.source === best.source && cur.slot === best.slot && cur.gameId === best.gameId);
     if (!sameNear) useGame.getState().setNearby(best);
+    const curHat = state.nearbyHat;
+    const sameHat =
+      (!curHat && !bestHat) ||
+      (curHat && bestHat && curHat.hatId === bestHat.hatId && curHat.slot === bestHat.slot);
+    if (!sameHat) useGame.getState().setNearbyHat(bestHat);
   });
 
   if (!user) return null;
@@ -381,7 +408,15 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
 
   return (
     <group ref={group} position={spawn}>
-      <Orb color={user.color} username={user.username} speaking={ptt} chat={live} local />
+      <Orb
+        color={user.color}
+        username={user.username}
+        speaking={ptt}
+        chat={live}
+        local
+        hatId={wornHatId}
+        trails={inMagic}
+      />
     </group>
   );
 }

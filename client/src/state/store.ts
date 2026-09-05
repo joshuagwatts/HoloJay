@@ -7,6 +7,11 @@ export type NearbyPortal = {
   gameId: string;
 } | null;
 
+export type NearbyHat = {
+  hatId: string;
+  slot: number;
+} | null;
+
 type GameStore = {
   token: string | null;
   user: AuthUser | null;
@@ -21,6 +26,9 @@ type GameStore = {
   loopCount: number;
   toast: string | null;
   nearby: NearbyPortal;
+  nearbyHat: NearbyHat;
+  wornHatId: string | null;
+  dresserHats: string[];
   pointerLocked: boolean;
   chatOpen: boolean;
   ptt: boolean;
@@ -51,6 +59,9 @@ type GameStore = {
   markCheckpoint: (index: number) => boolean;
   resetLoop: () => void;
   setNearby: (nearby: NearbyPortal) => void;
+  setNearbyHat: (nearbyHat: NearbyHat) => void;
+  setWornHatId: (hatId: string | null) => void;
+  setDresserHats: (hats: string[]) => void;
   setPointerLocked: (v: boolean) => void;
   setChatOpen: (v: boolean) => void;
   setPtt: (v: boolean) => void;
@@ -76,6 +87,9 @@ export const useGame = create<GameStore>((set, get) => ({
   loopCount: 0,
   toast: null,
   nearby: null,
+  nearbyHat: null,
+  wornHatId: null,
+  dresserHats: [],
   pointerLocked: false,
   chatOpen: false,
   ptt: false,
@@ -98,6 +112,9 @@ export const useGame = create<GameStore>((set, get) => ({
       location: { type: "hub" },
       followInvite: null,
       loopVisited: emptyLoop(),
+      nearbyHat: null,
+      wornHatId: null,
+      dresserHats: [],
       offline: false,
     }),
   setConnected: (connected) => set({ connected }),
@@ -142,6 +159,9 @@ export const useGame = create<GameStore>((set, get) => ({
   },
   resetLoop: () => set({ loopVisited: emptyLoop() }),
   setNearby: (nearby) => set({ nearby }),
+  setNearbyHat: (nearbyHat) => set({ nearbyHat }),
+  setWornHatId: (wornHatId) => set({ wornHatId }),
+  setDresserHats: (dresserHats) => set({ dresserHats }),
   setPointerLocked: (pointerLocked) => set({ pointerLocked }),
   setChatOpen: (chatOpen) => set({ chatOpen }),
   setPtt: (ptt) => set({ ptt }),

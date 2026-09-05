@@ -20,7 +20,7 @@ export const GAMES: GameDef[] = [
   { id: "cold-relay", name: "Cold Relay", color: "#84ffff", tagline: "Pass ice between vanishing pads" },
   { id: "halo-split", name: "Halo Split", color: "#f8bbd0", tagline: "Divide a ring without breaking it" },
   { id: "dust-crown", name: "Dust Crown", color: "#d1c4e9", tagline: "Sculpt a kingdom from falling ash" },
-  { id: "phase-anchor", name: "Phase Anchor", color: "#80cbc4", tagline: "Pin a glitch in the realm's heart" },
+  { id: "magic-room", name: "The Magic Room", color: "#c6ff00", tagline: "Dive into a living shader sea" },
 ];
 
 export function gameById(id: string): GameDef | undefined {

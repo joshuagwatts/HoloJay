@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
-import { CHECKPOINT_COUNT, gameById } from "@holojay/shared";
+import { CHECKPOINT_COUNT, gameById, hatById } from "@holojay/shared";
 import { clearToken } from "../auth/api.ts";
 import { setPadAxis, setPadSprint } from "../inputPad.ts";
+import { wearHat } from "../net/localRealm.ts";
 import { disconnectRealm, emitChat, emitEnter, emitFollow, emitLeave, emitPin, emitUnpin } from "../net/session.ts";
 import { useGame } from "../state/store.ts";
 
@@ -23,6 +24,8 @@ export function Hud() {
   const connected = useGame((s) => s.connected);
   const offline = useGame((s) => s.offline);
   const nearby = useGame((s) => s.nearby);
+  const nearbyHat = useGame((s) => s.nearbyHat);
+  const wornHatId = useGame((s) => s.wornHatId);
   const loopVisited = useGame((s) => s.loopVisited);
   const loopCount = useGame((s) => s.loopCount);
   const notice = useGame((s) => s.notice);
@@ -39,6 +42,7 @@ export function Hud() {
 
   const progress = loopVisited.filter(Boolean).length;
   const game = nearby ? gameById(nearby.gameId) : null;
+  const nearHat = nearbyHat ? hatById(nearbyHat.hatId) : null;
   const others = Object.keys(players).length;
 
   useEffect(() => {
@@ -136,7 +140,19 @@ export function Hud() {
         </div>
       ) : null}
 
-      {nearby && game ? (
+      {nearbyHat && nearHat ? (
+        <div className="prompt">
+          <p className="prompt-name">{nearHat.name}</p>
+          <p className="prompt-tag">
+            {wornHatId === nearHat.id ? "Already wearing — E removes it" : "Try it on at the dresser"}
+          </p>
+          <div className="prompt-actions">
+            <button type="button" className="prompt-btn" onClick={() => wearHat(nearHat.id)}>
+              {wornHatId === nearHat.id ? "Remove" : "Wear"}
+            </button>
+          </div>
+        </div>
+      ) : nearby && game ? (
         <div className="prompt">
           <p className="prompt-name">{game.name}</p>
           <p className="prompt-tag">{nearby.source === "return" ? "Leave this chamber" : game.tagline}</p>

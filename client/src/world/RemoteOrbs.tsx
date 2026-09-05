@@ -24,13 +24,20 @@ export function RemoteOrbs() {
         }
         const chat = lastChat[player.id];
         const live = chat && now - chat.at < 5000 ? chat.text : undefined;
-        return <InterpolatedOrb key={player.id} playerId={player.id} chat={live} />;
+        return (
+          <InterpolatedOrb
+            key={player.id}
+            playerId={player.id}
+            chat={live}
+            trails={location.type === "game" && location.gameId === "magic-room"}
+          />
+        );
       })}
     </>
   );
 }
 
-function InterpolatedOrb({ playerId, chat }: { playerId: string; chat?: string }) {
+function InterpolatedOrb({ playerId, chat, trails }: { playerId: string; chat?: string; trails?: boolean }) {
   const ref = useRef<THREE.Group>(null);
   const player = useGame((s) => s.players[playerId]);
 
@@ -45,7 +52,13 @@ function InterpolatedOrb({ playerId, chat }: { playerId: string; chat?: string }
 
   return (
     <group ref={ref} position={[player.position.x, player.position.y, player.position.z]}>
-      <Orb color={player.color} username={player.username} speaking={player.speaking} chat={chat} />
+      <Orb
+        color={player.color}
+        username={player.username}
+        speaking={player.speaking}
+        chat={chat}
+        trails={trails}
+      />
     </group>
   );
 }

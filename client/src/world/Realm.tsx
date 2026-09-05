@@ -6,6 +6,7 @@ import { portalSlotPose } from "@holojay/shared";
 import { useGame } from "../state/store.ts";
 import { FavoritesPlaza } from "./FavoritesPlaza.tsx";
 import { Figure8Path } from "./Figure8Path.tsx";
+import { HatDresser } from "./HatDresser.tsx";
 import { MinigameRoom } from "./MinigameRoom.tsx";
 import { PlayerController } from "./PlayerController.tsx";
 import { Portal } from "./Portal.tsx";
@@ -28,6 +29,7 @@ function Hub() {
       </mesh>
       <Figure8Path />
       <FavoritesPlaza />
+      <HatDresser />
       {assignments.map((assignment) => {
         const pose = portalSlotPose(assignment.slot);
         const hot = nearby?.source === "path" && nearby.slot === assignment.slot;
