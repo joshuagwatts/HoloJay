@@ -3,7 +3,6 @@ import { AuthOverlay } from "./ui/AuthOverlay.tsx";
 import { Hud } from "./ui/Hud.tsx";
 import { Realm } from "./world/Realm.tsx";
 import { clearToken, me, rememberGuest, savedToken, saveToken } from "./auth/api.ts";
-import { clearHubOverride, hasMultiplayerHub } from "./net/config.ts";
 import { connectSession, loadRuntimeConfig, startLocal } from "./net/session.ts";
 import { useGame } from "./state/store.ts";
 
@@ -18,26 +17,32 @@ export function App() {
     let cancelled = false;
 
     async function boot() {
+      // Absolute last resort — never leave the splash up
       const safety = window.setTimeout(() => {
         if (!cancelled) setBooting(false);
-      }, 2500);
+      }, 2000);
 
       try {
-        await Promise.race([
-          loadRuntimeConfig(),
-          new Promise<void>((resolve) => window.setTimeout(resolve, 1200)),
-        ]);
+        await loadRuntimeConfig().catch(() => undefined);
 
         const existing = savedToken();
         if (!existing) return;
 
+        // Local solo tokens: resolve instantly, no network
+        if (existing.startsWith("local.")) {
+          const { user: next } = await me(existing);
+          if (cancelled) return;
+          saveToken(existing);
+          rememberGuest(next);
+          useGame.getState().setAuth(existing, next);
+          startLocal(next);
+          sessionStarted.current = true;
+          return;
+        }
+
+        // JWT path (multiplayer hub)
         try {
-          const { user: next } = await Promise.race([
-            me(existing),
-            new Promise<never>((_, reject) => {
-              window.setTimeout(() => reject(new Error("me timeout")), 2000);
-            }),
-          ]);
+          const { user: next } = await me(existing);
           if (cancelled) return;
           saveToken(existing);
           rememberGuest(next);
@@ -45,9 +50,10 @@ export function App() {
           connectSession(existing, next);
           sessionStarted.current = true;
         } catch {
-          if (hasMultiplayerHub()) clearHubOverride();
           clearToken();
         }
+      } catch {
+        /* show auth */
       } finally {
         window.clearTimeout(safety);
         if (!cancelled) setBooting(false);
@@ -70,14 +76,12 @@ export function App() {
     connectSession(token, user);
   }, [token, user]);
 
-  // Never leave the user on "Opening…" — force solo plaza if hub didn't come up
   useEffect(() => {
     if (booting || !user || hubReady) return;
     const t = window.setTimeout(() => {
-      if (!useGame.getState().hubReady && useGame.getState().user) {
-        startLocal(useGame.getState().user!);
-      }
-    }, 800);
+      const u = useGame.getState().user;
+      if (u && !useGame.getState().hubReady) startLocal(u);
+    }, 600);
     return () => window.clearTimeout(t);
   }, [booting, user, hubReady]);
 

@@ -1,5 +1,5 @@
 import type { AuthResponse, AuthUser, Favorite } from "@holojay/shared";
-import { apiUrl, hasMultiplayerHub, loadRuntimeConfig } from "../net/config.ts";
+import { apiUrl, clearHubOverride, hasMultiplayerHub, loadRuntimeConfig } from "../net/config.ts";
 
 const TOKEN_KEY = "holojay.token";
 const USERS_KEY = "holojay.users";
@@ -57,10 +57,16 @@ async function read<T>(res: Response): Promise<T> {
 
 async function tryRemote<T>(fn: () => Promise<T>): Promise<T | null> {
   try {
+    let settled = false;
     return await Promise.race([
-      fn(),
-      new Promise<null>((_, reject) => {
-        window.setTimeout(() => reject(new Error("API timeout")), 2000);
+      fn().then((v) => {
+        settled = true;
+        return v;
+      }),
+      new Promise<null>((resolve) => {
+        window.setTimeout(() => {
+          if (!settled) resolve(null);
+        }, 1800);
       }),
     ]);
   } catch {
@@ -76,6 +82,32 @@ function localGuestUser(username: string, color: string): AuthUser {
     color,
     guest: true,
   };
+}
+
+function resolveLocalUser(token: string): AuthUser {
+  const id = token.slice("local.".length);
+  const users = Object.values(loadUsers());
+  const row = users.find((u) => u.id === id);
+  if (row) {
+    return { id: row.id, username: row.username, color: row.color, guest: false };
+  }
+  try {
+    const raw = localStorage.getItem("holojay.guest");
+    if (raw) {
+      const user = JSON.parse(raw) as AuthUser;
+      if (user.id === id) return user;
+    }
+  } catch {
+    /* ignore */
+  }
+  const orphan: AuthUser = {
+    id,
+    username: `orb_${id.slice(0, 4)}`,
+    color: "#5ce1ff",
+    guest: true,
+  };
+  localStorage.setItem("holojay.guest", JSON.stringify(orphan));
+  return orphan;
 }
 
 export async function register(username: string, password: string, color: string): Promise<AuthResponse> {
@@ -122,7 +154,6 @@ export async function login(username: string, password: string): Promise<AuthRes
 
 export async function guest(username: string, color: string): Promise<AuthResponse> {
   await loadRuntimeConfig();
-  // When a public hub is configured, always get a real JWT so friends can meet
   if (hasMultiplayerHub()) {
     const remote = await tryRemote(() =>
       fetch(apiUrl("/api/auth/guest"), {
@@ -132,6 +163,8 @@ export async function guest(username: string, color: string): Promise<AuthRespon
       }).then((res) => read<AuthResponse>(res)),
     );
     if (remote?.token && remote.user) return remote;
+    // Hub unreachable — don't hang on Drop in
+    clearHubOverride();
   }
   return localToken(localGuestUser(username, color));
 }
@@ -140,29 +173,9 @@ export async function me(token: string): Promise<{ user: AuthUser; favorites: Fa
   await loadRuntimeConfig();
 
   if (token.startsWith("local.")) {
-    // Hub is up but this browser only has a solo token — force a fresh hub login
-    if (hasMultiplayerHub()) {
-      throw new Error("Reconnect to the multiplayer hub");
-    }
-    const id = token.slice("local.".length);
-    const users = Object.values(loadUsers());
-    const row = users.find((u) => u.id === id);
-    if (row) {
-      return { user: { id: row.id, username: row.username, color: row.color, guest: false }, favorites: [] };
-    }
-    const raw = localStorage.getItem("holojay.guest");
-    if (raw) {
-      const user = JSON.parse(raw) as AuthUser;
-      if (user.id === id) return { user, favorites: [] };
-    }
-    const orphan: AuthUser = {
-      id,
-      username: `orb_${id.slice(0, 4)}`,
-      color: "#5ce1ff",
-      guest: true,
-    };
-    localStorage.setItem("holojay.guest", JSON.stringify(orphan));
-    return { user: orphan, favorites: [] };
+    // Solo token always works. If a hub link is set, drop it so boot isn't blocked.
+    if (hasMultiplayerHub()) clearHubOverride();
+    return { user: resolveLocalUser(token), favorites: [] };
   }
 
   if (!hasMultiplayerHub()) {
