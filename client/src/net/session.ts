@@ -33,34 +33,25 @@ export function connectSession(token: string, user: AuthUser): void {
   disconnectRealm();
   useGame.getState().setLocation({ type: "hub" });
 
-  // No public hub → solo plaza (GitHub Pages with empty config)
-  if (!hasMultiplayerHub()) {
+  // Default path on Pages: solo, immediate
+  if (!hasMultiplayerHub() || token.startsWith("local.")) {
     startLocal(user);
     return;
   }
 
-  // Hub is configured but token is solo-only — can't socket in; stay solo until they re-drop as guest
-  if (token.startsWith("local.")) {
-    startLocal(user);
-    useGame.getState().setNotice("Hub link found — leave & drop in again to join multiplayer");
-    return;
-  }
-
+  useGame.getState().setOffline(false);
+  // Open the plaza immediately; socket upgrades to multiplayer if the hub answers
+  startLocal(user);
   useGame.getState().setOffline(false);
   connectRealm(token);
 
   window.setTimeout(() => {
     const state = useGame.getState();
     if (state.token !== token) return;
-    if (state.connected && state.hubReady && !state.offline) return;
-    startLocal(user);
-    state.setNotice("Playing solo (hub unreachable)");
-    window.setTimeout(() => {
-      if (useGame.getState().notice?.startsWith("Playing solo")) {
-        useGame.getState().setNotice(null);
-      }
-    }, 2800);
-  }, 5000);
+    if (state.connected && !state.offline) return;
+    // Stay in the solo plaza we already opened
+    state.setOffline(true);
+  }, 4000);
 }
 
 export function emitMove(position: { x: number; y: number; z: number }, rotY: number): void {

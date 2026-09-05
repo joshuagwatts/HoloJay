@@ -1,89 +1,67 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { AuthOverlay } from "./ui/AuthOverlay.tsx";
 import { Hud } from "./ui/Hud.tsx";
 import { Realm } from "./world/Realm.tsx";
 import { clearToken, me, rememberGuest, savedToken, saveToken } from "./auth/api.ts";
+import { clearHubOverride } from "./net/config.ts";
 import { connectSession, loadRuntimeConfig, startLocal } from "./net/session.ts";
 import { useGame } from "./state/store.ts";
 
+/**
+ * Boot is intentionally dumb and fast:
+ * - local.* tokens → solo plaza immediately (no network)
+ * - anything else / failure → auth screen
+ * - never block the UI on hubReady / sockets
+ */
 export function App() {
   const user = useGame((s) => s.user);
-  const token = useGame((s) => s.token);
-  const hubReady = useGame((s) => s.hubReady);
   const [booting, setBooting] = useState(true);
-  const sessionStarted = useRef(false);
 
   useEffect(() => {
-    let cancelled = false;
+    let alive = true;
 
-    async function boot() {
-      // Absolute last resort — never leave the splash up
-      const safety = window.setTimeout(() => {
-        if (!cancelled) setBooting(false);
-      }, 2000);
+    const release = () => {
+      if (alive) setBooting(false);
+    };
+    // Hard cap — splash cannot outlive this
+    const hardCap = window.setTimeout(release, 800);
 
+    (async () => {
       try {
         await loadRuntimeConfig().catch(() => undefined);
+        if (!alive) return;
 
-        const existing = savedToken();
-        if (!existing) return;
+        const token = savedToken();
+        if (!token) return;
 
-        // Local solo tokens: resolve instantly, no network
-        if (existing.startsWith("local.")) {
-          const { user: next } = await me(existing);
-          if (cancelled) return;
-          saveToken(existing);
+        if (token.startsWith("local.")) {
+          clearHubOverride();
+          const { user: next } = await me(token);
+          if (!alive) return;
+          saveToken(token);
           rememberGuest(next);
-          useGame.getState().setAuth(existing, next);
+          useGame.getState().setAuth(token, next);
           startLocal(next);
-          sessionStarted.current = true;
           return;
         }
 
-        // JWT path (multiplayer hub)
-        try {
-          const { user: next } = await me(existing);
-          if (cancelled) return;
-          saveToken(existing);
-          rememberGuest(next);
-          useGame.getState().setAuth(existing, next);
-          connectSession(existing, next);
-          sessionStarted.current = true;
-        } catch {
-          clearToken();
-        }
+        // Stale JWT from a dead remote hub — don't wait on it
+        clearToken();
+        clearHubOverride();
       } catch {
-        /* show auth */
+        clearToken();
+        clearHubOverride();
       } finally {
-        window.clearTimeout(safety);
-        if (!cancelled) setBooting(false);
+        window.clearTimeout(hardCap);
+        release();
       }
-    }
+    })();
 
-    void boot();
     return () => {
-      cancelled = true;
+      alive = false;
+      window.clearTimeout(hardCap);
     };
   }, []);
-
-  useEffect(() => {
-    if (!token || !user) {
-      sessionStarted.current = false;
-      return;
-    }
-    if (sessionStarted.current || useGame.getState().hubReady) return;
-    sessionStarted.current = true;
-    connectSession(token, user);
-  }, [token, user]);
-
-  useEffect(() => {
-    if (booting || !user || hubReady) return;
-    const t = window.setTimeout(() => {
-      const u = useGame.getState().user;
-      if (u && !useGame.getState().hubReady) startLocal(u);
-    }, 600);
-    return () => window.clearTimeout(t);
-  }, [booting, user, hubReady]);
 
   if (booting) {
     return (
@@ -94,14 +72,6 @@ export function App() {
   }
 
   if (!user) return <AuthOverlay />;
-
-  if (!hubReady) {
-    return (
-      <div className="boot">
-        <p>Opening the plaza…</p>
-      </div>
-    );
-  }
 
   return (
     <div className="shell">
