@@ -6,11 +6,15 @@
     "server",
     "shared"
   ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "concurrently -n server,client -c cyan,magenta \"npm run dev -w @holojay/server\" \"npm run dev -w @holojay/client\"",
     "dev:web": "npm run dev -w @holojay/client",
     "build": "npm run build -w @holojay/client",
     "preview": "npm run build && npm run preview -w @holojay/client",
+    "start:hub": "npm run start -w @holojay/server",
     "smoke": "node scripts/smoke.mjs"
   },
   "devDependencies": {
