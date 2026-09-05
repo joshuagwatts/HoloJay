@@ -24,20 +24,35 @@ import {
 
 export { disconnectRealm, startLocal };
 
+/** GitHub Pages / static builds have no realm server — always solo. */
+export function isStaticSolo(): boolean {
+  return !import.meta.env.DEV && !import.meta.env.VITE_SERVER_URL;
+}
+
 function localMode(): boolean {
-  return useGame.getState().offline;
+  return useGame.getState().offline || isStaticSolo();
 }
 
 export function connectSession(token: string, user: AuthUser): void {
   disconnectRealm();
-  useGame.getState().setHubReady(false);
   useGame.getState().setLocation({ type: "hub" });
-  if (token.startsWith("local.")) {
+
+  // Pages deploy (and any build without a server URL) must never wait on sockets
+  if (token.startsWith("local.") || isStaticSolo()) {
     startLocal(user);
     return;
   }
+
+  useGame.getState().setHubReady(false);
   useGame.getState().setOffline(false);
   connectRealm(token);
+
+  // If the hub never welcomes us, fall back to solo so refresh isn't a black hole
+  window.setTimeout(() => {
+    if (!useGame.getState().hubReady && useGame.getState().token === token) {
+      startLocal(user);
+    }
+  }, 2500);
 }
 
 export function emitMove(position: { x: number; y: number; z: number }, rotY: number): void {

@@ -114,6 +114,10 @@ export async function login(username: string, password: string): Promise<AuthRes
 }
 
 export async function guest(username: string, color: string): Promise<AuthResponse> {
+  // Static Pages: skip API entirely so "Drop in" never hangs
+  if (!import.meta.env.DEV && !import.meta.env.VITE_SERVER_URL) {
+    return localToken(localGuestUser(username, color));
+  }
   const remote = await tryRemote(() =>
     fetch("/api/auth/guest", {
       method: "POST",
@@ -130,7 +134,6 @@ export async function me(token: string): Promise<{ user: AuthUser; favorites: Fa
     const id = token.slice("local.".length);
     const users = Object.values(loadUsers());
     const row = users.find((u) => u.id === id);
-    const stored = localStorage.getItem(TOKEN_KEY);
     if (row) {
       return { user: { id: row.id, username: row.username, color: row.color, guest: false }, favorites: [] };
     }
@@ -139,15 +142,29 @@ export async function me(token: string): Promise<{ user: AuthUser; favorites: Fa
       const user = JSON.parse(raw) as AuthUser;
       if (user.id === id) return { user, favorites: [] };
     }
-    if (stored === token) {
-      throw new Error("Local session expired");
-    }
-    throw new Error("Invalid session");
+    // Orphaned local token — synthesize a guest so refresh still enters the hub
+    const orphan: AuthUser = {
+      id,
+      username: `orb_${id.slice(0, 4)}`,
+      color: "#5ce1ff",
+      guest: true,
+    };
+    localStorage.setItem("holojay.guest", JSON.stringify(orphan));
+    return { user: orphan, favorites: [] };
   }
 
-  return fetch("/api/auth/me", {
-    headers: { Authorization: `Bearer ${token}` },
-  }).then((res) => read<{ user: AuthUser; favorites: Favorite[] }>(res));
+  // Static Pages has no /api — don't hang waiting for a server JWT
+  if (!import.meta.env.DEV && !import.meta.env.VITE_SERVER_URL) {
+    throw new Error("Server session unavailable offline");
+  }
+
+  const remote = await tryRemote(() =>
+    fetch("/api/auth/me", {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => read<{ user: AuthUser; favorites: Favorite[] }>(res)),
+  );
+  if (remote?.user) return remote;
+  throw new Error("Invalid session");
 }
 
 export function rememberGuest(user: AuthUser): void {

@@ -3,7 +3,7 @@ import { AuthOverlay } from "./ui/AuthOverlay.tsx";
 import { Hud } from "./ui/Hud.tsx";
 import { Realm } from "./world/Realm.tsx";
 import { clearToken, me, rememberGuest, savedToken, saveToken } from "./auth/api.ts";
-import { connectSession, disconnectRealm } from "./net/session.ts";
+import { connectSession, disconnectRealm, isStaticSolo } from "./net/session.ts";
 import { useGame } from "./state/store.ts";
 
 export function App() {
@@ -13,41 +13,66 @@ export function App() {
   const [booting, setBooting] = useState(true);
 
   useEffect(() => {
-    const existing = savedToken();
-    if (!existing) {
-      setBooting(false);
-      return;
-    }
-    me(existing)
-      .then(({ user: next }) => {
-        saveToken(existing);
+    let cancelled = false;
+
+    async function boot() {
+      const existing = savedToken();
+      if (!existing) {
+        if (!cancelled) setBooting(false);
+        return;
+      }
+
+      try {
+        const { user: next } = await me(existing);
+        if (cancelled) return;
+        // On Pages, rewrite any leftover server JWT into a local session token
+        const tokenToUse =
+          isStaticSolo() && !existing.startsWith("local.")
+            ? `local.${next.id}`
+            : existing;
+        saveToken(tokenToUse);
         rememberGuest(next);
-        useGame.getState().setAuth(existing, next);
-        // Hydrate the hub BEFORE the canvas mounts (local is sync; remote waits on welcome)
-        connectSession(existing, next);
-      })
-      .catch(() => clearToken())
-      .finally(() => setBooting(false));
+        useGame.getState().setAuth(tokenToUse, next);
+        connectSession(tokenToUse, next);
+      } catch {
+        clearToken();
+      } finally {
+        if (!cancelled) setBooting(false);
+      }
+    }
+
+    void boot();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
     if (!token || !user) return;
     if (!useGame.getState().hubReady) connectSession(token, user);
     return () => {
+      // Do NOT flip hubReady off here — Strict Mode cleanup was trapping refresh on "Loading…"
       disconnectRealm();
-      useGame.getState().setHubReady(false);
     };
   }, [token, user]);
 
-  if (booting || (user && !hubReady)) {
+  if (booting) {
+    return (
+      <div className="boot">
+        <p>Warming the plaza…</p>
+      </div>
+    );
+  }
+
+  if (!user) return <AuthOverlay />;
+
+  if (!hubReady) {
     return (
       <div className="boot">
         <p>Loading the hub…</p>
       </div>
     );
   }
-
-  if (!user) return <AuthOverlay />;
 
   return (
     <div className="shell">
