@@ -46,9 +46,9 @@ function makeLevel(n: number): LevelDef {
     hull: 3 + (soft >= 6 ? 1 : 0) + (soft >= 14 ? 1 : 0),
     driveSpeed: 17 + Math.min(soft, 16) * 0.55,
     turnRate: 2.05,
-    // Start sparse; ramp slowly. Level 0 ~3.4s between meteors.
-    meteorEvery: Math.max(0.32, 4.2 - soft * 0.18),
-    alienEvery: Math.max(0.55, 5.0 - soft * 0.2),
+    // Level 0 already has pressure; denser each clear.
+    meteorEvery: Math.max(0.28, 1.15 - soft * 0.045),
+    alienEvery: Math.max(0.42, 1.85 - soft * 0.06),
   };
 }
 
@@ -64,6 +64,27 @@ function levelIndexFromId(id: string | undefined): number {
 function terrainNoise(x: number, z: number): number {
   const s = Math.sin(x * 0.21 + z * 0.17) * 43758.5453;
   return s - Math.floor(s);
+}
+
+/** Six clear elevation terraces — wide shelves, not chaotic bumps. */
+const TERRACE_COUNT = 6;
+const TERRACE_STEP = 0.7;
+
+function terraceIndex(x: number, z: number, startZ: number, endZ: number): number {
+  const span = Math.max(1, startZ - endZ);
+  const along = (startZ - z) / span; // 0 start → 1 gate
+  // Low-frequency shelves: long ridges + lateral benches
+  const wave =
+    Math.sin(z * 0.028) * 0.42 +
+    Math.sin(x * 0.022 + z * 0.008) * 0.33 +
+    Math.sin((x * 0.5 + z) * 0.018) * 0.25;
+  const raw = Math.min(0.999, Math.max(0, 0.28 + along * 0.22 + wave * 0.55));
+  return Math.min(TERRACE_COUNT - 1, Math.floor(raw * TERRACE_COUNT));
+}
+
+function terraceTop(elev: number): number {
+  // Slab thickness base 0.55 + elev*step → top face Y
+  return 0.55 + elev * TERRACE_STEP;
 }
 
 type Role = "driver" | "gunner";
@@ -211,6 +232,13 @@ export function SkyEscort({ color }: { color: string }) {
     () => ({
       dirt: [
         new THREE.MeshStandardMaterial({
+          color: "#2a1e14",
+          emissive: "#120c08",
+          emissiveIntensity: 0.1,
+          roughness: 1,
+          flatShading: true,
+        }),
+        new THREE.MeshStandardMaterial({
           color: "#3a2a1c",
           emissive: "#1a1008",
           emissiveIntensity: 0.12,
@@ -218,17 +246,31 @@ export function SkyEscort({ color }: { color: string }) {
           flatShading: true,
         }),
         new THREE.MeshStandardMaterial({
-          color: "#2e2418",
-          emissive: "#140e08",
-          emissiveIntensity: 0.1,
-          roughness: 1,
-          flatShading: true,
-        }),
-        new THREE.MeshStandardMaterial({
           color: "#463522",
           emissive: "#1c140a",
           emissiveIntensity: 0.14,
           roughness: 0.96,
+          flatShading: true,
+        }),
+        new THREE.MeshStandardMaterial({
+          color: "#4a3824",
+          emissive: "#1e160c",
+          emissiveIntensity: 0.12,
+          roughness: 0.95,
+          flatShading: true,
+        }),
+        new THREE.MeshStandardMaterial({
+          color: "#52402a",
+          emissive: "#20180e",
+          emissiveIntensity: 0.1,
+          roughness: 0.94,
+          flatShading: true,
+        }),
+        new THREE.MeshStandardMaterial({
+          color: "#5a4830",
+          emissive: "#221a10",
+          emissiveIntensity: 0.08,
+          roughness: 0.93,
           flatShading: true,
         }),
       ],
@@ -309,11 +351,14 @@ export function SkyEscort({ color }: { color: string }) {
     const z1 = Math.floor((L.endZ - L.tile * 4) / L.tile) * L.tile;
     for (let zz = z0; zz >= z1; zz -= L.tile) {
       for (let xx = x0; xx <= x1; xx += L.tile) {
-        const n = terrainNoise(xx, zz);
         const finish =
           zz <= L.endZ + L.tile * 1.5 && zz >= L.endZ - L.tile * 2.5 && Math.abs(xx) <= L.tile * 3;
-        const h = finish ? 0.22 : 0.15 + n * 0.7;
-        const shade = finish ? 0 : Math.floor(terrainNoise(xx + 9, zz - 4) * 4);
+        // Flat runway near spawn so you don't start on a cliff edge.
+        const nearStart = zz >= L.startZ - L.tile * 2;
+        let elev = terraceIndex(xx, zz, L.startZ, L.endZ);
+        if (finish || nearStart) elev = Math.min(elev, 1);
+        const h = elev * TERRACE_STEP;
+        const shade = finish ? 0 : elev;
         list.push({ id: id++, x: xx, z: zz, drop: 0, gone: false, h, shade, safe: finish });
       }
     }
@@ -369,7 +414,7 @@ export function SkyEscort({ color }: { color: string }) {
     }
     x.current = 0;
     z.current = L.startZ;
-    y.current = 0.85;
+    y.current = terraceTop(1);
     yaw.current = Math.PI;
     speed.current = 0;
     falling.current = false;
@@ -381,8 +426,8 @@ export function SkyEscort({ color }: { color: string }) {
     aliens.current = [];
     bullets.current = [];
     blasts.current = [];
-    meteorAcc.current = -Math.min(5, 2.5 + L.meteorEvery * 0.45);
-    alienAcc.current = -Math.min(6, 3 + L.alienEvery * 0.4);
+    meteorAcc.current = -0.35;
+    alienAcc.current = -0.8;
     buildTerrain();
     shakeRef.current = 0;
     failCueT.current = 0;
@@ -648,21 +693,24 @@ export function SkyEscort({ color }: { color: string }) {
         y.current -= 14 * clamped;
         if (y.current < -4) {
           falling.current = false;
-          y.current = 0.85;
           hurt(1);
           const solid = tiles.current.find((t) => !t.gone && t.drop < 0.2 && Math.abs(t.z - z.current) < 16);
           if (solid) {
             x.current = solid.x;
             z.current = solid.z;
+            y.current = terraceTop(Math.round((solid.h ?? 0) / TERRACE_STEP));
+          } else {
+            y.current = terraceTop(1);
           }
         }
       } else {
-        y.current = THREE.MathUtils.damp(y.current, 0.85, 12, clamped);
+        const elev = under ? Math.round((under.h ?? 0) / TERRACE_STEP) : 1;
+        const targetY = under ? terraceTop(elev) : terraceTop(1);
+        y.current = THREE.MathUtils.damp(y.current, targetY, 10, clamped);
       }
 
       meteorAcc.current += clamped;
-      // Soft mid-run ramp — early levels stay sparse.
-      const meteorEvery = Math.max(0.32, level.meteorEvery - progress * Math.min(0.55, 0.12 + levelIdxRef.current * 0.04));
+      const meteorEvery = Math.max(0.28, level.meteorEvery - progress * Math.min(0.45, 0.2 + levelIdxRef.current * 0.03));
       if (meteorAcc.current >= meteorEvery) {
         meteorAcc.current = 0;
         meteors.current.push({
@@ -872,16 +920,17 @@ export function SkyEscort({ color }: { color: string }) {
       tiles.current,
       (t, mesh) => {
         mesh.visible = !t.gone;
-        const thick = 0.55 + (t.h ?? 0.3);
+        const elev = Math.round((t.h ?? 0) / TERRACE_STEP);
+        const thick = terraceTop(elev); // base+steps — flat terrace stacks
         // Full tile size with tiny overlap so slabs touch — no gaps.
         mesh.scale.set(level.tile * 1.01, thick, level.tile * 1.01);
         mesh.position.set(t.x, thick * 0.5 - t.drop, t.z);
-        mesh.rotation.z = t.drop > 0 ? t.drop * 0.05 * Math.sign(t.x || 1) : 0;
-        mesh.rotation.x = t.drop > 0 ? t.drop * 0.03 : (t.h ?? 0) * 0.04 - 0.02;
+        mesh.rotation.z = t.drop > 0 ? t.drop * 0.04 * Math.sign(t.x || 1) : 0;
+        mesh.rotation.x = t.drop > 0 ? t.drop * 0.02 : 0;
         if (t.drop > 0) mesh.material = mats.dirtHot;
         else if (t.safe) mesh.material = mats.finish;
-        else if ((t.shade ?? 0) >= 3) mesh.material = mats.rock;
-        else mesh.material = mats.dirt[(t.shade ?? 0) % mats.dirt.length];
+        else if (elev >= 4) mesh.material = mats.rock;
+        else mesh.material = mats.dirt[elev % mats.dirt.length];
       },
       () => new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mats.dirt[0]),
     );
