@@ -82,6 +82,44 @@ input {
   letter-spacing: 0.28em;
   text-transform: uppercase;
   color: var(--brass);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.channel-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  letter-spacing: 0.16em;
+  font-size: 10px;
+}
+
+.channel-badge em {
+  font-style: normal;
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  color: var(--paper);
+}
+
+.channel-badge.alpha em {
+  border-color: rgba(255, 107, 138, 0.55);
+  color: var(--rose);
+}
+
+.channel-badge.beta em {
+  border-color: rgba(124, 240, 255, 0.45);
+  color: var(--cyan);
+}
+
+.channel-badge a {
+  color: rgba(244, 236, 220, 0.55);
+  text-decoration: none;
+}
+
+.channel-badge a:hover {
+  color: var(--paper);
 }
 
 h1 {

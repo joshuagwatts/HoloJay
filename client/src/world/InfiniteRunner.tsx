@@ -33,7 +33,7 @@ export function InfiniteRunner({ color }: { color: string }) {
   const vy = useRef(0);
   const grounded = useRef(true);
   const dist = useRef(0);
-  const speed = useRef(14);
+  const speed = useRef(16);
   const spawnAcc = useRef(0);
   const nextId = useRef(1);
   const obstacles = useRef<Obstacle[]>([]);
@@ -63,7 +63,7 @@ export function InfiniteRunner({ color }: { color: string }) {
     vy.current = 0;
     grounded.current = true;
     dist.current = 0;
-    speed.current = 14;
+    speed.current = 16;
     spawnAcc.current = 0;
     obstacles.current = [];
     submitted.current = false;
@@ -130,7 +130,8 @@ export function InfiniteRunner({ color }: { color: string }) {
     x.current += (targetX - x.current) * Math.min(1, 14 * clamped);
 
     if (phaseRef.current === "run") {
-      speed.current = Math.min(34, 14 + dist.current * 0.035);
+      // Faster start + steeper climb — feels spicy by ~80–120m
+      speed.current = Math.min(44, 16 + dist.current * 0.062);
       dist.current += speed.current * clamped;
       scroll.current += speed.current * clamped;
       scoreAcc.current += clamped;
@@ -148,19 +149,21 @@ export function InfiniteRunner({ color }: { color: string }) {
       }
 
       spawnAcc.current += clamped;
-      const spawnEvery = Math.max(0.55, 1.15 - dist.current * 0.004);
+      const spawnEvery = Math.max(0.32, 0.92 - dist.current * 0.0075);
+      const barChance = Math.min(0.58, 0.3 + dist.current * 0.0035);
+      const twinChance = Math.min(0.62, 0.24 + dist.current * 0.0045);
       if (spawnAcc.current >= spawnEvery) {
         spawnAcc.current = 0;
         const lanePick = Math.floor(Math.random() * 3);
-        const kind: Obstacle["kind"] = Math.random() < 0.35 ? "bar" : "block";
+        const kind: Obstacle["kind"] = Math.random() < barChance ? "bar" : "block";
         obstacles.current.push({ id: nextId.current++, z: -48, lane: lanePick, kind });
-        if (Math.random() < 0.28) {
+        if (Math.random() < twinChance) {
           const other = (lanePick + 1 + Math.floor(Math.random() * 2)) % 3;
           obstacles.current.push({
             id: nextId.current++,
-            z: -48 - 3.5,
+            z: -48 - 2.6,
             lane: other,
-            kind: Math.random() < 0.4 ? "bar" : "block",
+            kind: Math.random() < barChance + 0.08 ? "bar" : "block",
           });
         }
       }
