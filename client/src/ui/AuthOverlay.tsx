@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ORB_COLORS } from "@holojay/shared";
 import { guest, login, register, rememberGuest, saveToken } from "../auth/api.ts";
+import { connectSession } from "../net/session.ts";
 import { useGame } from "../state/store.ts";
 
 type Mode = "enter" | "login" | "register";
@@ -17,6 +18,7 @@ export function AuthOverlay() {
     saveToken(token);
     rememberGuest(user);
     useGame.getState().setAuth(token, user);
+    connectSession(token, user);
   }
 
   async function onGuest() {

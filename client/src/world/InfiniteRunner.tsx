@@ -81,6 +81,14 @@ export function InfiniteRunner({ color }: { color: string }) {
     camera.updateProjectionMatrix();
     camReady.current = true;
     document.exitPointerLock?.();
+    return () => {
+      // Hand the scene back to the hub look when the runner unmounts
+      camera.near = 0.1;
+      camera.far = 220;
+      camera.position.set(3, 4.2, 11);
+      camera.lookAt(0, 1.2, 0);
+      camera.updateProjectionMatrix();
+    };
   }, [camera]);
 
   useEffect(() => {

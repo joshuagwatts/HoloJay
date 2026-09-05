@@ -30,6 +30,8 @@ function localMode(): boolean {
 
 export function connectSession(token: string, user: AuthUser): void {
   disconnectRealm();
+  useGame.getState().setHubReady(false);
+  useGame.getState().setLocation({ type: "hub" });
   if (token.startsWith("local.")) {
     startLocal(user);
     return;

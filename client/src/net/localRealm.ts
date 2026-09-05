@@ -143,6 +143,10 @@ export function localLoopComplete(): void {
 
 export function localEnter(source: "path" | "favorite", slot: number, gameId: string): void {
   const state = useGame.getState();
+  if (!state.hubReady || state.location.type !== "hub") {
+    state.setNotice("Hub still loading");
+    return;
+  }
   const valid =
     source === "path"
       ? state.assignments.find((a) => a.slot === slot && a.gameId === gameId)

@@ -47,6 +47,7 @@ type GameStore = {
   notice: string | null;
   localPos: { x: number; y: number; z: number };
   offline: boolean;
+  hubReady: boolean;
 
   setAuth: (token: string, user: AuthUser) => void;
   clearAuth: () => void;
@@ -81,6 +82,7 @@ type GameStore = {
   setNotice: (notice: string | null) => void;
   setLocalPos: (pos: { x: number; y: number; z: number }) => void;
   setOffline: (v: boolean) => void;
+  setHubReady: (v: boolean) => void;
 };
 
 const emptyLoop = () => Array.from({ length: CHECKPOINT_COUNT }, () => false);
@@ -111,6 +113,7 @@ export const useGame = create<GameStore>((set, get) => ({
   notice: null,
   localPos: { x: 0, y: 1.2, z: 0 },
   offline: false,
+  hubReady: false,
 
   setAuth: (token, user) => set({ token, user }),
   clearAuth: () =>
@@ -130,6 +133,7 @@ export const useGame = create<GameStore>((set, get) => ({
       dresserHats: [],
       leaderboards: {},
       offline: false,
+      hubReady: false,
     }),
   setConnected: (connected) => set({ connected }),
   setWelcome: ({ self, players, assignments, favorites }) =>
@@ -137,10 +141,12 @@ export const useGame = create<GameStore>((set, get) => ({
       selfId: self.id,
       assignments,
       favorites,
-      location: self.location,
+      // Always land in the hub first — minigames only after the plaza is up
+      location: { type: "hub" },
       players: Object.fromEntries(players.map((p) => [p.id, p])),
       connected: true,
       loopVisited: emptyLoop(),
+      hubReady: true,
     }),
   upsertPlayer: (player) => set({ players: { ...get().players, [player.id]: player } }),
   removePlayer: (id) => {
@@ -185,4 +191,5 @@ export const useGame = create<GameStore>((set, get) => ({
   setNotice: (notice) => set({ notice }),
   setLocalPos: (localPos) => set({ localPos }),
   setOffline: (offline) => set({ offline }),
+  setHubReady: (hubReady) => set({ hubReady }),
 }));

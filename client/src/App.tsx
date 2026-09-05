@@ -9,6 +9,7 @@ import { useGame } from "./state/store.ts";
 export function App() {
   const user = useGame((s) => s.user);
   const token = useGame((s) => s.token);
+  const hubReady = useGame((s) => s.hubReady);
   const [booting, setBooting] = useState(true);
 
   useEffect(() => {
@@ -22,6 +23,8 @@ export function App() {
         saveToken(existing);
         rememberGuest(next);
         useGame.getState().setAuth(existing, next);
+        // Hydrate the hub BEFORE the canvas mounts (local is sync; remote waits on welcome)
+        connectSession(existing, next);
       })
       .catch(() => clearToken())
       .finally(() => setBooting(false));
@@ -29,14 +32,17 @@ export function App() {
 
   useEffect(() => {
     if (!token || !user) return;
-    connectSession(token, user);
-    return () => disconnectRealm();
+    if (!useGame.getState().hubReady) connectSession(token, user);
+    return () => {
+      disconnectRealm();
+      useGame.getState().setHubReady(false);
+    };
   }, [token, user]);
 
-  if (booting) {
+  if (booting || (user && !hubReady)) {
     return (
       <div className="boot">
-        <p>Warming the plaza…</p>
+        <p>Loading the hub…</p>
       </div>
     );
   }

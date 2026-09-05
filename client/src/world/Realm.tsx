@@ -52,7 +52,10 @@ function Hub() {
 
 function Scene() {
   const location = useGame((s) => s.location);
-  return location.type === "hub" ? <Hub /> : <MinigameRoom />;
+  const hubReady = useGame((s) => s.hubReady);
+  // Hub always wins until it's ready — never mount a minigame first
+  if (!hubReady || location.type === "hub") return <Hub />;
+  return <MinigameRoom />;
 }
 
 export function Realm() {
