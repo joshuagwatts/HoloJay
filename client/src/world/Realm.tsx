@@ -23,7 +23,7 @@ function Hub() {
     <>
       <hemisphereLight args={["#b9d7ff", "#1a1224", 0.62]} />
       <directionalLight position={[18, 28, 12]} intensity={0.7} color="#fff1d6" />
-      <Stars radius={140} depth={60} count={2800} factor={3.2} saturation={0} fade speed={0.55} />
+      <Stars radius={120} depth={50} count={1200} factor={2.8} saturation={0} fade speed={0.4} />
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.04, 0]}>
         <planeGeometry args={[240, 240]} />
         <meshStandardMaterial color="#07060d" />
@@ -62,8 +62,22 @@ export function Realm() {
   return (
     <Canvas
       camera={{ fov: 64, near: 0.1, far: 220, position: [3, 4.2, 11] }}
-      dpr={[1, 1.75]}
-      gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping }}
+      dpr={[1, 1.5]}
+      gl={{
+        antialias: true,
+        toneMapping: THREE.ACESFilmicToneMapping,
+        powerPreference: "high-performance",
+        failIfMajorPerformanceCaveat: false,
+      }}
+      onCreated={({ gl }) => {
+        gl.domElement.addEventListener(
+          "webglcontextlost",
+          (e) => {
+            e.preventDefault();
+          },
+          false,
+        );
+      }}
     >
       <color attach="background" args={["#06050c"]} />
       <fog attach="fog" args={["#06050c", 32, 100]} />

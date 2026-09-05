@@ -3,7 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>HoloJay — Portal Realm</title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <title>HoloJay - Portal Realm</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -14,5 +15,18 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // Last-resort recovery if React never paints (cached crash / WebGL blowup)
+      setTimeout(function () {
+        var root = document.getElementById("root");
+        if (!root || root.childNodes.length) return;
+        root.innerHTML =
+          '<div class="boot" style="padding:24px;text-align:center">' +
+          "<p>Plaza failed to start.</p>" +
+          '<p style="opacity:.7;font-size:13px">Hard refresh (Ctrl+Shift+R) or clear site data for this page.</p>' +
+          '<button type="button" onclick="location.reload()" style="margin-top:12px;padding:8px 14px">Reload</button>' +
+          "</div>";
+      }, 2500);
+    </script>
   </body>
 </html>
