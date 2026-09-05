@@ -35,7 +35,6 @@ export function Hud() {
   const favorites = useGame((s) => s.favorites);
   const players = useGame((s) => s.players);
   const [draft, setDraft] = useState("");
-  const [hintGone, setHintGone] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const progress = loopVisited.filter(Boolean).length;
@@ -51,6 +50,7 @@ export function Hud() {
       }
       if (e.code === "Escape") {
         useGame.getState().setChatOpen(false);
+        document.exitPointerLock();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -60,10 +60,6 @@ export function Hud() {
   useEffect(() => {
     if (chatOpen) inputRef.current?.focus();
   }, [chatOpen]);
-
-  useEffect(() => {
-    if (pointerLocked) setHintGone(true);
-  }, [pointerLocked]);
 
   function sendChat(e: FormEvent) {
     e.preventDefault();
@@ -121,10 +117,8 @@ export function Hud() {
         </b>
       </div>
 
-      {!hintGone && !chatOpen ? (
-        <div className="hint-center">
-          Drag to look · scroll to zoom · use the pad to fly · tap a cabinet to play
-        </div>
+      {!pointerLocked && !chatOpen ? (
+        <div className="hint-center">Click the realm to look around · Esc frees the mouse</div>
       ) : null}
 
       {notice ? <div className="notice">{notice}</div> : null}
@@ -205,9 +199,9 @@ export function Hud() {
       ) : null}
 
       <footer className="hud-bottom">
-        <span>Drag look · scroll zoom · pad / WASD fly</span>
+        <span>Mouse look · scroll zoom · pad / WASD fly</span>
         <span>
-          Click cabinet or <kbd>E</kbd> play · <kbd>C</kbd> sticky look
+          <kbd>E</kbd> / Play button · <kbd>Esc</kbd> free mouse
         </span>
         <span className={ptt ? "live" : ""}>
           <kbd>V</kbd> talk {micReady ? (ptt ? "• live" : "• ready") : ""}

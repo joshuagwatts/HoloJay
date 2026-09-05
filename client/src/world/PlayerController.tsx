@@ -57,9 +57,6 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
   const zoom = useRef(8.2);
   const sendAcc = useRef(0);
   const loopSent = useRef(false);
-  const dragging = useRef(false);
-  const dragButton = useRef(0);
-  const dragDist = useRef(0);
   const { camera, gl } = useThree();
   const user = useGame((s) => s.user);
   const location = useGame((s) => s.location);
@@ -79,9 +76,9 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
 
   useEffect(() => {
     const el = gl.domElement;
-    const orbit = (dx: number, dy: number) => {
-      yaw.current -= dx * 0.003;
-      const next = pitch.current - dy * 0.0026;
+    const look = (dx: number, dy: number) => {
+      yaw.current -= dx * 0.0022;
+      const next = pitch.current - dy * 0.0018;
       const floorPitch = minPitchForFloor(pos.current.y, zoom.current);
       pitch.current = Math.max(floorPitch, Math.min(1.32, next));
     };
@@ -104,9 +101,8 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
       }
       if (e.code === "KeyE") tryInteract();
       if (e.code === "KeyF") tryFavorite();
-      if (e.code === "KeyC") {
-        if (document.pointerLockElement === el) document.exitPointerLock();
-        else void el.requestPointerLock();
+      if (e.code === "Escape" && document.pointerLockElement === el) {
+        document.exitPointerLock();
       }
     };
     const upKey = (e: KeyboardEvent) => {
@@ -117,65 +113,38 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
       }
     };
 
-    const pointerDown = (e: PointerEvent) => {
+    const click = () => {
       if (useGame.getState().chatOpen) return;
-      if (e.button !== 0 && e.button !== 2) return;
-      dragging.current = true;
-      dragButton.current = e.button;
-      dragDist.current = 0;
-      el.setPointerCapture(e.pointerId);
-      useGame.getState().setPointerLocked(true);
+      if (document.pointerLockElement !== el) void el.requestPointerLock();
     };
-    const pointerUp = (e: PointerEvent) => {
-      if (!dragging.current) return;
-      const wasDrag = dragDist.current > 8;
-      const button = dragButton.current;
-      dragging.current = false;
-      useGame.getState().setPointerLocked(false);
-      // Short left-click near a cabinet = play (mouse-friendly)
-      if (button === 0 && !wasDrag && !useGame.getState().chatOpen) {
-        tryInteract();
-      }
-    };
-    const pointerMove = (e: PointerEvent) => {
+    const mouseMove = (e: MouseEvent) => {
       if (useGame.getState().chatOpen) return;
-      if (document.pointerLockElement === el) {
-        orbit(e.movementX, e.movementY);
-        return;
-      }
-      if (!dragging.current) return;
-      dragDist.current += Math.abs(e.movementX) + Math.abs(e.movementY);
-      orbit(e.movementX, e.movementY);
+      if (document.pointerLockElement !== el) return;
+      look(e.movementX, e.movementY);
     };
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
-      // Two-finger scroll / mouse wheel = zoom
       zoom.current = Math.max(3.4, Math.min(18, zoom.current + Math.sign(e.deltaY) * 0.7));
     };
-    const lock = () => {
-      // Only treat real pointer-lock as sticky look mode
-      if (document.pointerLockElement === el) useGame.getState().setPointerLocked(true);
+    const lockChange = () => {
+      useGame.getState().setPointerLocked(document.pointerLockElement === el);
     };
     const blockMenu = (e: Event) => e.preventDefault();
 
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", upKey);
-    el.addEventListener("pointerdown", pointerDown);
-    el.addEventListener("pointerup", pointerUp);
-    el.addEventListener("pointercancel", pointerUp);
-    el.addEventListener("pointermove", pointerMove);
+    el.addEventListener("click", click);
+    document.addEventListener("mousemove", mouseMove);
     el.addEventListener("wheel", wheel, { passive: false });
-    document.addEventListener("pointerlockchange", lock);
+    document.addEventListener("pointerlockchange", lockChange);
     el.addEventListener("contextmenu", blockMenu);
     return () => {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", upKey);
-      el.removeEventListener("pointerdown", pointerDown);
-      el.removeEventListener("pointerup", pointerUp);
-      el.removeEventListener("pointercancel", pointerUp);
-      el.removeEventListener("pointermove", pointerMove);
+      el.removeEventListener("click", click);
+      document.removeEventListener("mousemove", mouseMove);
       el.removeEventListener("wheel", wheel);
-      document.removeEventListener("pointerlockchange", lock);
+      document.removeEventListener("pointerlockchange", lockChange);
       el.removeEventListener("contextmenu", blockMenu);
       keys.clear();
     };
