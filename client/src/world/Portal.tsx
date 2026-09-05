@@ -2,7 +2,7 @@ import { Html } from "@react-three/drei";
 import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { gameById, isCompetitive } from "@holojay/shared";
+import { gameById, isCompetitive, type LeaderboardEntry } from "@holojay/shared";
 import { useGame } from "../state/store.ts";
 
 type PortalProps = {
@@ -13,6 +13,9 @@ type PortalProps = {
   label?: string;
 };
 
+/** Stable empty board — `?? []` in a zustand selector creates a new array every snapshot and infinite-loops React. */
+const EMPTY_BOARD: LeaderboardEntry[] = [];
+
 function shade(hex: string, amount: number) {
   const c = new THREE.Color(hex);
   c.offsetHSL(0, 0, amount);
@@ -21,7 +24,7 @@ function shade(hex: string, amount: number) {
 
 export function Portal({ position, yaw, gameId, highlight, label }: PortalProps) {
   const game = gameById(gameId);
-  const board = useGame((s) => s.leaderboards[gameId] ?? []);
+  const board = useGame((s) => s.leaderboards[gameId] ?? EMPTY_BOARD);
   const color = game?.color ?? "#88ccff";
   const body = useMemo(() => shade(color, -0.42), [color]);
   const bodyDark = useMemo(() => shade(color, -0.55), [color]);
