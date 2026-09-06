@@ -292,6 +292,8 @@ export function SkyEscort({ color }: { color: string }) {
   const blasts = useRef<Blast[]>([]);
 
   const buggy = useRef<THREE.Group>(null);
+  const gunMount = useRef<THREE.Group>(null);
+  const gunPitchMount = useRef<THREE.Group>(null);
   const tileGroup = useRef<THREE.Group>(null);
   const meteorGroup = useRef<THREE.Group>(null);
   const alienGroup = useRef<THREE.Group>(null);
@@ -407,6 +409,27 @@ export function SkyEscort({ color }: { color: string }) {
     setPhase(next);
   }
 
+  function broadcastSnap() {
+    if (!isHost || instanceId.startsWith("local:")) return;
+    emitMinigame(instanceId, "sky-escort", {
+      type: "snap",
+      phase: phaseRef.current,
+      hull: hullRef.current,
+      x: x.current,
+      z: z.current,
+      y: y.current,
+      yaw: yaw.current,
+      tiles: tiles.current.map((t) => ({ ...t })),
+      meteors: meteors.current.map((m) => ({ ...m })),
+      aliens: aliens.current.map((a) => ({ ...a })),
+      blasts: blasts.current.map((b) => ({ ...b })),
+      shake: shakeRef.current,
+      driverId: driverIdRef.current,
+      gunnerId: gunnerIdRef.current,
+      levelId: activeLevel().id,
+    } satisfies Snap);
+  }
+
   function addBlast(px: number, py: number, pz: number) {
     blasts.current.push({ id: nextId.current++, x: px, y: py, z: pz, age: 0 });
     if (blasts.current.length > 22) blasts.current.shift();
@@ -419,13 +442,35 @@ export function SkyEscort({ color }: { color: string }) {
     invuln.current = 1.05;
     shakeRef.current = Math.max(shakeRef.current, 0.55);
     addBlast(x.current, y.current + 0.4, z.current);
-    if (hullRef.current <= 0) setPhaseBoth("dead");
+    if (hullRef.current <= 0) {
+      setPhaseBoth("dead");
+      // Snaps only run during "run" — push one last death snap so gunner/clients see it.
+      broadcastSnap();
+    }
   }
 
+  /** Rear cupola pivot in world space (matches gunMount local pos). */
   function turretWorld() {
-    const ox = Math.sin(yaw.current) * -1.35;
-    const oz = Math.cos(yaw.current) * -1.35;
-    return { x: x.current + ox, y: y.current + 1.35, z: z.current + oz };
+    const back = 2.05;
+    const ox = Math.sin(yaw.current) * -back;
+    const oz = Math.cos(yaw.current) * -back;
+    return { x: x.current + ox, y: y.current + 1.55, z: z.current + oz };
+  }
+
+  /** Muzzle tip along current aim — bullets leave here. */
+  function muzzleWorld() {
+    const t = turretWorld();
+    const aimYaw = yaw.current + gunYaw.current;
+    const cy = Math.cos(aimYaw);
+    const sy = Math.sin(aimYaw);
+    const cp = Math.cos(gunPitch.current);
+    const sp = Math.sin(gunPitch.current);
+    const len = 1.9;
+    return {
+      x: t.x + sy * cp * len,
+      y: t.y + sp * len,
+      z: t.z + cy * cp * len,
+    };
   }
 
   function activeLevel() {
@@ -1003,21 +1048,21 @@ function buildTerrain() {
         });
       }
 
-      const turret = turretWorld();
+      const muzzle = muzzleWorld();
       fireCd.current = Math.max(0, fireCd.current - clamped);
       const gunIsAi = gunnerIdRef.current === "ai";
 
       if (gunIsAi && aliens.current[0] && fireCd.current <= 0) {
         const t = aliens.current[0];
-        const dx = t.x - turret.x;
-        const dy = t.y - turret.y;
-        const dz = t.z - turret.z;
+        const dx = t.x - muzzle.x;
+        const dy = t.y - muzzle.y;
+        const dz = t.z - muzzle.z;
         const len = Math.hypot(dx, dy, dz) || 1;
         bullets.current.push({
           id: nextId.current++,
-          x: turret.x,
-          y: turret.y,
-          z: turret.z,
+          x: muzzle.x,
+          y: muzzle.y,
+          z: muzzle.z,
           dx: dx / len,
           dy: dy / len,
           dz: dz / len,
@@ -1043,11 +1088,12 @@ function buildTerrain() {
           const sy = Math.sin(aimYaw);
           const cp = Math.cos(gunPitch.current);
           const sp = Math.sin(gunPitch.current);
+          const tip = muzzleWorld();
           bullets.current.push({
             id: nextId.current++,
-            x: turret.x,
-            y: turret.y,
-            z: turret.z,
+            x: tip.x,
+            y: tip.y,
+            z: tip.z,
             dx: sy * cp,
             dy: sp,
             dz: cy * cp,
@@ -1157,6 +1203,8 @@ function buildTerrain() {
       buggy.current.rotation.y = yaw.current;
       buggy.current.rotation.z = keys.current.steer * -0.12;
     }
+    if (gunMount.current) gunMount.current.rotation.y = gunYaw.current;
+    if (gunPitchMount.current) gunPitchMount.current.rotation.x = -gunPitch.current;
 
     syncGroup(
       tileGroup.current,
@@ -1266,19 +1314,35 @@ function buildTerrain() {
     const sh = shakeRef.current;
     const ox = (Math.random() - 0.5) * sh;
     const oy = (Math.random() - 0.5) * sh;
+    const persp = camera as THREE.PerspectiveCamera;
     if (seatRef.current === "gunner" && phaseRef.current !== "ready") {
+      // Seated behind the cupola: see shield + barrel in FOV, look down the iron.
       const t = turretWorld();
       const aimYaw = yaw.current + gunYaw.current;
       const cy = Math.cos(aimYaw);
       const sy = Math.sin(aimYaw);
       const cp = Math.cos(gunPitch.current);
       const sp = Math.sin(gunPitch.current);
-      camera.position.set(t.x + ox * 0.2, t.y + 0.4 + oy * 0.2, t.z);
-      camera.lookAt(t.x + sy * cp * 28, t.y + sp * 28, t.z + cy * cp * 28);
+      const eyeBack = 0.78;
+      const eyeUp = 0.42;
+      camera.position.set(
+        t.x - sy * eyeBack + ox * 0.18,
+        t.y + eyeUp + oy * 0.18,
+        t.z - cy * eyeBack,
+      );
+      camera.lookAt(t.x + sy * cp * 36, t.y + sp * 36 + 0.15, t.z + cy * cp * 36);
+      if (persp.isPerspectiveCamera) {
+        persp.fov = 56;
+        persp.updateProjectionMatrix();
+      }
     } else {
-      const back = phaseRef.current === "ready" ? 14 : 11;
+      if (persp.isPerspectiveCamera && persp.fov !== 60) {
+        persp.fov = 60;
+        persp.updateProjectionMatrix();
+      }
+      const back = phaseRef.current === "ready" ? 15 : 12;
       const tx = x.current - Math.sin(yaw.current) * back;
-      const ty = y.current + (phaseRef.current === "ready" ? 7 : 5.1);
+      const ty = y.current + (phaseRef.current === "ready" ? 7.2 : 5.4);
       const tz = z.current - Math.cos(yaw.current) * back;
       if (phaseRef.current === "ready") {
         camera.position.set(tx, ty, tz);
@@ -1359,56 +1423,118 @@ function buildTerrain() {
       </group>
 
       <group ref={buggy} position={[0, 0.85, level.startZ]} rotation={[0, Math.PI, 0]}>
-        {/* chunky offroad buggy — ground trek, not a plane */}
-        <mesh position={[0, 0.4, 0]}>
-          <boxGeometry args={[2.55, 0.7, 4.2]} />
-          <meshStandardMaterial color="#2c2118" metalness={0.35} roughness={0.55} />
+        {/* Warthog-style trek buggy: cabin forward, open rear gun deck */}
+        <mesh position={[0, 0.38, 0.15]} castShadow>
+          <boxGeometry args={[2.9, 0.55, 5.1]} />
+          <meshStandardMaterial color="#241c16" metalness={0.4} roughness={0.55} />
         </mesh>
-        <mesh position={[0, 0.95, 0.55]}>
-          <boxGeometry args={[1.7, 0.7, 1.9]} />
-          <meshStandardMaterial color={color} emissive={color} emissiveIntensity={1.35} />
+        {/* nose / hood */}
+        <mesh position={[0, 0.72, 1.55]} castShadow>
+          <boxGeometry args={[2.35, 0.55, 1.7]} />
+          <meshStandardMaterial color="#2a211a" metalness={0.45} roughness={0.5} />
         </mesh>
-        <mesh position={[0, 1.35, 0.2]}>
-          <boxGeometry args={[1.55, 0.12, 1.5]} />
-          <meshStandardMaterial color="#1a1410" metalness={0.6} roughness={0.4} />
+        <mesh position={[0, 0.95, 1.35]}>
+          <boxGeometry args={[1.85, 0.22, 1.2]} />
+          <meshStandardMaterial color={color} emissive={color} emissiveIntensity={1.15} />
         </mesh>
-        {/* roll cage */}
-        <mesh position={[-0.7, 1.55, 0.1]}>
-          <boxGeometry args={[0.08, 0.9, 1.8]} />
-          <meshStandardMaterial color="#4e342e" metalness={0.5} />
+        {/* driver cockpit */}
+        <mesh position={[0, 1.15, 0.35]} castShadow>
+          <boxGeometry args={[1.85, 0.85, 1.55]} />
+          <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.95} />
         </mesh>
-        <mesh position={[0.7, 1.55, 0.1]}>
-          <boxGeometry args={[0.08, 0.9, 1.8]} />
-          <meshStandardMaterial color="#4e342e" metalness={0.5} />
+        <mesh position={[0, 1.55, 0.2]}>
+          <boxGeometry args={[1.65, 0.12, 1.35]} />
+          <meshStandardMaterial color="#120e0b" metalness={0.65} roughness={0.35} />
         </mesh>
-        <mesh position={[0, 1.95, 0.1]}>
-          <boxGeometry args={[1.5, 0.08, 1.8]} />
-          <meshStandardMaterial color="#4e342e" metalness={0.5} />
+        {/* roll cage over driver */}
+        <mesh position={[-0.82, 1.75, 0.25]}>
+          <boxGeometry args={[0.1, 1.05, 1.7]} />
+          <meshStandardMaterial color="#4e342e" metalness={0.55} />
+        </mesh>
+        <mesh position={[0.82, 1.75, 0.25]}>
+          <boxGeometry args={[0.1, 1.05, 1.7]} />
+          <meshStandardMaterial color="#4e342e" metalness={0.55} />
+        </mesh>
+        <mesh position={[0, 2.25, 0.25]}>
+          <boxGeometry args={[1.75, 0.1, 1.7]} />
+          <meshStandardMaterial color="#4e342e" metalness={0.55} />
+        </mesh>
+        {/* rear gun deck */}
+        <mesh position={[0, 0.72, -1.55]} castShadow>
+          <boxGeometry args={[2.55, 0.28, 1.9]} />
+          <meshStandardMaterial color="#1a1410" metalness={0.5} roughness={0.6} />
+        </mesh>
+        <mesh position={[0, 0.95, -1.55]} rotation={[-Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[0.75, 1.15, 24]} />
+          <meshStandardMaterial color="#5d4037" metalness={0.7} roughness={0.35} side={THREE.DoubleSide} />
         </mesh>
         {[
-          [-1.35, 0.15, 1.35],
-          [1.35, 0.15, 1.35],
-          [-1.35, 0.15, -1.35],
-          [1.35, 0.15, -1.35],
+          [-1.45, 0.12, 1.55],
+          [1.45, 0.12, 1.55],
+          [-1.45, 0.12, -1.65],
+          [1.45, 0.12, -1.65],
         ].map((p, i) => (
-          <mesh key={i} position={p as [number, number, number]} rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[0.55, 0.55, 0.42, 14]} />
-            <meshStandardMaterial color="#14100c" roughness={0.95} />
+          <mesh key={i} position={p as [number, number, number]} rotation={[0, 0, Math.PI / 2]} castShadow>
+            <cylinderGeometry args={[0.62, 0.62, 0.48, 14]} />
+            <meshStandardMaterial color="#100c09" roughness={0.95} />
           </mesh>
         ))}
-        <mesh position={[0, 1.25, -1.55]}>
-          <cylinderGeometry args={[0.35, 0.42, 0.5, 8]} />
-          <meshStandardMaterial color="#5d4037" metalness={0.55} />
-        </mesh>
-        <mesh position={[0, 1.55, -1.75]} rotation={[0.35, 0, 0]}>
-          <cylinderGeometry args={[0.09, 0.12, 1.25, 8]} />
-          <meshStandardMaterial color="#efebe9" metalness={0.75} />
-        </mesh>
-        <mesh position={[0, 0.55, 2.05]}>
-          <sphereGeometry args={[0.3, 12, 12]} />
+        <mesh position={[0, 0.58, 2.45]}>
+          <sphereGeometry args={[0.32, 12, 12]} />
           <meshStandardMaterial color={color} emissive={color} emissiveIntensity={2.8} />
         </mesh>
-        <pointLight color={color} intensity={9} distance={12} />
+        <pointLight position={[0, 1.2, 2.2]} color={color} intensity={10} distance={14} />
+
+        {/* rotating cupola — sits where the gunner is */}
+        <group ref={gunMount} position={[0, 1.55, -2.05]}>
+          <mesh position={[0, -0.12, 0]}>
+            <cylinderGeometry args={[0.55, 0.62, 0.28, 16]} />
+            <meshStandardMaterial color="#3e2723" metalness={0.6} roughness={0.4} />
+          </mesh>
+          {/* seat pad behind the gun */}
+          <mesh position={[0, -0.35, -0.55]}>
+            <boxGeometry args={[0.7, 0.18, 0.55]} />
+            <meshStandardMaterial color="#1b1511" roughness={0.85} />
+          </mesh>
+          <mesh position={[0, 0.05, -0.72]}>
+            <boxGeometry args={[0.65, 0.55, 0.12]} />
+            <meshStandardMaterial color="#2c2118" roughness={0.7} />
+          </mesh>
+          <group ref={gunPitchMount}>
+            {/* armored gun shield — fills lower FOV for the gunner */}
+            <mesh position={[0, 0.15, 0.35]}>
+              <boxGeometry args={[1.15, 0.72, 0.1]} />
+              <meshStandardMaterial color="#4e342e" metalness={0.55} roughness={0.45} />
+            </mesh>
+            <mesh position={[0, 0.42, 0.42]}>
+              <boxGeometry args={[0.85, 0.18, 0.08]} />
+              <meshStandardMaterial color="#6d4c41" metalness={0.5} />
+            </mesh>
+            {/* receiver + barrel along local +Z (vehicle forward when gunYaw=0) */}
+            <mesh position={[0, 0.08, 0.55]}>
+              <boxGeometry args={[0.38, 0.32, 0.7]} />
+              <meshStandardMaterial color="#efebe9" metalness={0.8} roughness={0.25} />
+            </mesh>
+            <mesh position={[0, 0.06, 1.45]} rotation={[Math.PI / 2, 0, 0]}>
+              <cylinderGeometry args={[0.09, 0.12, 1.85, 10]} />
+              <meshStandardMaterial color="#d7ccc8" metalness={0.85} roughness={0.2} />
+            </mesh>
+            <mesh position={[0, 0.06, 2.35]} rotation={[Math.PI / 2, 0, 0]}>
+              <cylinderGeometry args={[0.14, 0.11, 0.22, 8]} />
+              <meshStandardMaterial color="#ffab40" emissive="#ff6d00" emissiveIntensity={0.8} metalness={0.6} />
+            </mesh>
+            {/* twin grips */}
+            <mesh position={[-0.38, -0.05, 0.15]} rotation={[0.4, 0, 0.2]}>
+              <cylinderGeometry args={[0.05, 0.05, 0.45, 6]} />
+              <meshStandardMaterial color="#3e2723" />
+            </mesh>
+            <mesh position={[0.38, -0.05, 0.15]} rotation={[0.4, 0, -0.2]}>
+              <cylinderGeometry args={[0.05, 0.05, 0.45, 6]} />
+              <meshStandardMaterial color="#3e2723" />
+            </mesh>
+            <pointLight position={[0, 0.2, 1.1]} color="#ffab40" intensity={4} distance={6} />
+          </group>
+        </group>
       </group>
 
       <Html fullscreen style={{ pointerEvents: phase === "ready" ? "auto" : "none" }}>
@@ -1426,7 +1552,27 @@ function buildTerrain() {
               </div>
             </div>
           )}
-          <div className="sky-escort-card" style={{ visibility: phase === "intro" ? "hidden" : "visible" }}>
+          {phase === "dead" && (
+            <div className="sky-escort-dead" aria-live="assertive">
+              <div className="sky-escort-dead-flash" />
+              <div className="sky-escort-dead-vignette" />
+              <p className="sky-escort-dead-kicker">Hull zero</p>
+              <h2 className="sky-escort-dead-title">YOU&apos;RE DEAD</h2>
+              <p className="sky-escort-dead-sub">Buggy cooked — dive ship got you</p>
+              <p className="sky-escort-dead-hint">Space / R / Enter to retry</p>
+            </div>
+          )}
+          {phase === "run" && seat === "gunner" && (
+            <div className="sky-escort-crosshair" aria-hidden>
+              <span className="sky-escort-crosshair-h" />
+              <span className="sky-escort-crosshair-v" />
+              <span className="sky-escort-crosshair-ring" />
+            </div>
+          )}
+          <div
+            className="sky-escort-card"
+            style={{ visibility: phase === "intro" || phase === "dead" ? "hidden" : "visible" }}
+          >
             <em>{level.name}</em>
             <strong>Sky Escort</strong>
             {phase === "ready" && (
@@ -1437,7 +1583,7 @@ function buildTerrain() {
                 <p className="sky-escort-hint">
                   {seat === "driver"
                     ? "Finale run — WASD drive the buggy across the plain; meteors punch holes in the ground"
-                    : "Rear turret seat — click to aim, hold fire on dive-bombers"}
+                    : "Rear turret seat — click to lock aim, hold fire on dive-bombers"}
                 </p>
                 <div className="sky-escort-actions">
                   <button type="button" className={seat === "driver" ? "on" : ""} onClick={() => pickSeat("driver")}>
@@ -1481,7 +1627,7 @@ function buildTerrain() {
                 <p className="sky-escort-hint">
                   {seat === "driver"
                     ? `WASD trek · Shift boost (${loadoutHud.boostCharges}/${loadoutHud.boostMax}) · follow the beacon`
-                    : "Mouse aim · click / Space fire"}
+                    : "Mouse aim · click / Space fire · seated on the rear cupola"}
                 </p>
               </>
             )}
@@ -1490,7 +1636,6 @@ function buildTerrain() {
                 {`Gate secured — deploying ${makeLevel(levelIdx + 1).name}`}
               </p>
             )}
-            {phase === "dead" && <p>Buggy cooked — Space to retry</p>}
           </div>
         </div>
       </Html>
