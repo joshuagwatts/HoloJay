@@ -294,6 +294,8 @@ export function SkyEscort({ color }: { color: string }) {
   const buggy = useRef<THREE.Group>(null);
   const gunMount = useRef<THREE.Group>(null);
   const gunPitchMount = useRef<THREE.Group>(null);
+  /** First-person gun hardware locked to camera — always fills the gunner FOV. */
+  const fpGun = useRef<THREE.Group>(null);
   const tileGroup = useRef<THREE.Group>(null);
   const meteorGroup = useRef<THREE.Group>(null);
   const alienGroup = useRef<THREE.Group>(null);
@@ -1204,7 +1206,11 @@ function buildTerrain() {
       buggy.current.rotation.z = keys.current.steer * -0.12;
     }
     if (gunMount.current) gunMount.current.rotation.y = gunYaw.current;
-    if (gunPitchMount.current) gunPitchMount.current.rotation.x = -gunPitch.current;
+    if (gunPitchMount.current) {
+      gunPitchMount.current.rotation.x = -gunPitch.current;
+      // Local gunner uses the camera-locked FP gun — hide world barrel to avoid double mesh.
+      gunPitchMount.current.visible = !(seatRef.current === "gunner" && phaseRef.current !== "ready");
+    }
 
     syncGroup(
       tileGroup.current,
@@ -1222,9 +1228,9 @@ function buildTerrain() {
         if (t.drop > 0) mesh.material = mats.dirtHot;
         else if (t.safe) mesh.material = mats.finish;
         else if (elevRound >= TERRACE_COUNT - 2) mesh.material = mats.rock;
-        else mesh.material = mats.dirt[elevRound % mats.dirt.length];
+        else mesh.material = mats.dirt[elevRound % mats.dirt.length]!;
       },
-      () => new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mats.dirt[0]),
+      () => new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mats.dirt[0]!),
     );
 
     syncGroup(
@@ -1315,27 +1321,39 @@ function buildTerrain() {
     const ox = (Math.random() - 0.5) * sh;
     const oy = (Math.random() - 0.5) * sh;
     const persp = camera as THREE.PerspectiveCamera;
-    if (seatRef.current === "gunner" && phaseRef.current !== "ready") {
-      // Seated behind the cupola: see shield + barrel in FOV, look down the iron.
+    const gunnerLive = seatRef.current === "gunner" && phaseRef.current !== "ready";
+    if (gunnerLive) {
+      // Seated in the rear cupola, looking down the iron.
       const t = turretWorld();
       const aimYaw = yaw.current + gunYaw.current;
       const cy = Math.cos(aimYaw);
       const sy = Math.sin(aimYaw);
       const cp = Math.cos(gunPitch.current);
       const sp = Math.sin(gunPitch.current);
-      const eyeBack = 0.78;
-      const eyeUp = 0.42;
+      const eyeBack = 0.48;
+      const eyeUp = 0.28;
       camera.position.set(
-        t.x - sy * eyeBack + ox * 0.18,
-        t.y + eyeUp + oy * 0.18,
+        t.x - sy * eyeBack + ox * 0.14,
+        t.y + eyeUp + oy * 0.14,
         t.z - cy * eyeBack,
       );
-      camera.lookAt(t.x + sy * cp * 36, t.y + sp * 36 + 0.15, t.z + cy * cp * 36);
+      camera.lookAt(t.x + sy * cp * 40, t.y + sp * 40 + 0.05, t.z + cy * cp * 40);
       if (persp.isPerspectiveCamera) {
-        persp.fov = 56;
+        persp.fov = 52;
         persp.updateProjectionMatrix();
       }
+      // FP gun rides the camera so shield + barrel always read in the seat.
+      if (fpGun.current) {
+        if (fpGun.current.parent !== camera) camera.add(fpGun.current);
+        fpGun.current.visible = true;
+        fpGun.current.position.set(0, -0.22, -0.55);
+        fpGun.current.rotation.set(0, 0, 0);
+      }
     } else {
+      if (fpGun.current) {
+        fpGun.current.visible = false;
+        if (fpGun.current.parent === camera) camera.remove(fpGun.current);
+      }
       if (persp.isPerspectiveCamera && persp.fov !== 60) {
         persp.fov = 60;
         persp.updateProjectionMatrix();
@@ -1537,7 +1555,62 @@ function buildTerrain() {
         </group>
       </group>
 
-      <Html fullscreen style={{ pointerEvents: phase === "ready" ? "auto" : "none" }}>
+      {/* FP turret — attached to camera while gunning so the seat always feels usable */}
+      <group ref={fpGun} visible={false}>
+        {/* side armor cheeks */}
+        <mesh position={[-0.62, -0.06, 0.05]}>
+          <boxGeometry args={[0.32, 0.62, 0.55]} />
+          <meshStandardMaterial color="#3e2723" metalness={0.55} roughness={0.45} />
+        </mesh>
+        <mesh position={[0.62, -0.06, 0.05]}>
+          <boxGeometry args={[0.32, 0.62, 0.55]} />
+          <meshStandardMaterial color="#3e2723" metalness={0.55} roughness={0.45} />
+        </mesh>
+        {/* split gun shield with sight gap */}
+        <mesh position={[-0.28, 0.02, -0.12]}>
+          <boxGeometry args={[0.42, 0.48, 0.07]} />
+          <meshStandardMaterial color="#5d4037" metalness={0.6} roughness={0.4} />
+        </mesh>
+        <mesh position={[0.28, 0.02, -0.12]}>
+          <boxGeometry args={[0.42, 0.48, 0.07]} />
+          <meshStandardMaterial color="#5d4037" metalness={0.6} roughness={0.4} />
+        </mesh>
+        <mesh position={[0, 0.28, -0.1]}>
+          <boxGeometry args={[0.95, 0.12, 0.06]} />
+          <meshStandardMaterial color="#6d4c41" metalness={0.55} />
+        </mesh>
+        {/* iron sight */}
+        <mesh position={[0, 0.14, -0.22]}>
+          <boxGeometry args={[0.04, 0.1, 0.04]} />
+          <meshStandardMaterial color="#ffab40" emissive="#ff6d00" emissiveIntensity={0.9} />
+        </mesh>
+        {/* receiver */}
+        <mesh position={[0, -0.06, -0.05]}>
+          <boxGeometry args={[0.28, 0.22, 0.45]} />
+          <meshStandardMaterial color="#efebe9" metalness={0.8} roughness={0.25} />
+        </mesh>
+        {/* barrel — camera looks down -Z */}
+        <mesh position={[0, -0.04, -0.95]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.05, 0.07, 1.55, 10]} />
+          <meshStandardMaterial color="#d7ccc8" metalness={0.85} roughness={0.2} />
+        </mesh>
+        <mesh position={[0, -0.04, -1.72]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.09, 0.07, 0.18, 8]} />
+          <meshStandardMaterial color="#ffab40" emissive="#ff6d00" emissiveIntensity={1.1} metalness={0.6} />
+        </mesh>
+        {/* grips */}
+        <mesh position={[-0.22, -0.2, 0.08]} rotation={[0.55, 0, 0.25]}>
+          <cylinderGeometry args={[0.035, 0.035, 0.32, 6]} />
+          <meshStandardMaterial color="#3e2723" />
+        </mesh>
+        <mesh position={[0.22, -0.2, 0.08]} rotation={[0.55, 0, -0.25]}>
+          <cylinderGeometry args={[0.035, 0.035, 0.32, 6]} />
+          <meshStandardMaterial color="#3e2723" />
+        </mesh>
+        <pointLight position={[0, 0.05, -0.4]} color="#ffab40" intensity={2.5} distance={3} />
+      </group>
+
+      <Html fullscreen zIndexRange={[100, 0]} style={{ pointerEvents: phase === "ready" ? "auto" : "none" }}>
         <div className="sky-escort-hud">
           {phase === "intro" && introLevel && (
             <div className="sky-escort-intro" aria-live="polite">

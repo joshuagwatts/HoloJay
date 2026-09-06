@@ -810,14 +810,14 @@ kbd {
 }
 
 .sky-escort-dead {
-  position: absolute;
+  position: fixed;
   inset: 0;
-  z-index: 40;
+  z-index: 9999;
   display: grid;
   place-content: center;
   gap: 8px;
   text-align: center;
-  background: radial-gradient(ellipse at center, rgba(48, 8, 6, 0.88) 0%, rgba(4, 1, 1, 0.97) 72%);
+  background: radial-gradient(ellipse at center, rgba(48, 8, 6, 0.92) 0%, rgba(4, 1, 1, 0.98) 72%);
   pointer-events: none;
   animation: sky-dead-in 0.35s ease-out both;
 }
