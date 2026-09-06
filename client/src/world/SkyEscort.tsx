@@ -66,25 +66,46 @@ function terrainNoise(x: number, z: number): number {
   return s - Math.floor(s);
 }
 
-/** Six clear elevation terraces — wide shelves, not chaotic bumps. */
-const TERRACE_COUNT = 6;
-const TERRACE_STEP = 0.7;
+/** Ten elevation bands with blended slopes between shelves. */
+const TERRACE_COUNT = 10;
+const TERRACE_STEP = 0.55;
 
-function terraceIndex(x: number, z: number, startZ: number, endZ: number): number {
+/** Continuous terrace field 0..COUNT (floors = shelves, fractions = slopes). */
+function terraceFloat(x: number, z: number, startZ: number, endZ: number): number {
   const span = Math.max(1, startZ - endZ);
   const along = (startZ - z) / span; // 0 start → 1 gate
-  // Low-frequency shelves: long ridges + lateral benches
   const wave =
-    Math.sin(z * 0.028) * 0.42 +
-    Math.sin(x * 0.022 + z * 0.008) * 0.33 +
-    Math.sin((x * 0.5 + z) * 0.018) * 0.25;
-  const raw = Math.min(0.999, Math.max(0, 0.28 + along * 0.22 + wave * 0.55));
-  return Math.min(TERRACE_COUNT - 1, Math.floor(raw * TERRACE_COUNT));
+    Math.sin(z * 0.024) * 0.38 +
+    Math.sin(x * 0.018 + z * 0.007) * 0.32 +
+    Math.sin((x * 0.45 + z) * 0.015) * 0.22 +
+    Math.sin(z * 0.011 - x * 0.009) * 0.12;
+  const raw = Math.min(0.999, Math.max(0, 0.22 + along * 0.28 + wave * 0.55));
+  return raw * (TERRACE_COUNT - 1);
+}
+
+/** Softstep blend so shelves stay flat and transitions become angled slopes. */
+function terraceBlended(x: number, z: number, startZ: number, endZ: number): number {
+  const f = terraceFloat(x, z, startZ, endZ);
+  const base = Math.floor(f);
+  const frac = f - base;
+  // Flat shelf for ~55% of band; slope blend in the outer edges
+  let blend: number;
+  if (frac < 0.22) blend = 0;
+  else if (frac > 0.78) blend = 1;
+  else {
+    const t = (frac - 0.22) / 0.56;
+    blend = t * t * (3 - 2 * t);
+  }
+  return base + blend;
 }
 
 function terraceTop(elev: number): number {
-  // Slab thickness base 0.55 + elev*step → top face Y
-  return 0.55 + elev * TERRACE_STEP;
+  // Slab thickness base 0.5 + elev*step → top face Y
+  return 0.5 + elev * TERRACE_STEP;
+}
+
+function sampleGroundH(x: number, z: number, startZ: number, endZ: number): number {
+  return terraceBlended(x, z, startZ, endZ) * TERRACE_STEP;
 }
 
 type Role = "driver" | "gunner";
@@ -98,6 +119,8 @@ type Tile = {
   gone: boolean;
   h: number;
   shade: number;
+  pitch: number;
+  roll: number;
   /** Finish pad — never craters; solid ground under the gate. */
   safe?: boolean;
 };
@@ -105,6 +128,39 @@ type Meteor = { id: number; x: number; y: number; z: number; vx: number; vy: num
 type Alien = { id: number; x: number; y: number; z: number; hp: number };
 type Bullet = { id: number; x: number; y: number; z: number; dx: number; dy: number; dz: number };
 type Blast = { id: number; x: number; y: number; z: number; age: number };
+
+/** Lowkey upgrade / booster scaffolding — expand later without rewriting the loop. */
+type UpgradeId = "boost" | "armor" | "radar" | "turret";
+type Loadout = {
+  boostCharges: number;
+  boostMax: number;
+  armorBonus: number;
+  radar: boolean;
+  turretRate: number;
+};
+type Pickup = {
+  id: number;
+  kind: UpgradeId;
+  x: number;
+  y: number;
+  z: number;
+  taken: boolean;
+};
+
+const DEFAULT_LOADOUT = (): Loadout => ({
+  boostCharges: 1,
+  boostMax: 1,
+  armorBonus: 0,
+  radar: false,
+  turretRate: 1,
+});
+
+const UPGRADE_LABEL: Record<UpgradeId, string> = {
+  boost: "Boost cell",
+  armor: "Hull plate",
+  radar: "Threat radar",
+  turret: "Turret feed",
+};
 
 type Snap = {
   type: "snap";
@@ -191,6 +247,13 @@ export function SkyEscort({ color }: { color: string }) {
   const [introLevel, setIntroLevel] = useState<{ idx: number; name: string } | null>(null);
   const introT = useRef(0);
   const advancing = useRef(false);
+  const loadout = useRef<Loadout>(DEFAULT_LOADOUT());
+  const [loadoutHud, setLoadoutHud] = useState<Loadout>(DEFAULT_LOADOUT());
+  const pickups = useRef<Pickup[]>([]);
+  const boostTimer = useRef(0);
+  const pickupGroup = useRef<THREE.Group>(null);
+  const gateBeacon = useRef<THREE.Group>(null);
+  const headingArrow = useRef<THREE.Group>(null);
   const introNextRef = useRef(1);
 
   const phaseRef = useRef<Phase>("ready");
@@ -280,7 +343,36 @@ export function SkyEscort({ color }: { color: string }) {
           roughness: 0.93,
           flatShading: true,
         }),
-      ],
+      ,
+        new THREE.MeshStandardMaterial({
+          color: "#624e34",
+          emissive: "#241c12",
+          emissiveIntensity: 0.08,
+          roughness: 0.92,
+          flatShading: true,
+        }),
+        new THREE.MeshStandardMaterial({
+          color: "#6a563c",
+          emissive: "#261e14",
+          emissiveIntensity: 0.07,
+          roughness: 0.91,
+          flatShading: true,
+        }),
+        new THREE.MeshStandardMaterial({
+          color: "#725e44",
+          emissive: "#282016",
+          emissiveIntensity: 0.06,
+          roughness: 0.9,
+          flatShading: true,
+        }),
+        new THREE.MeshStandardMaterial({
+          color: "#7a664c",
+          emissive: "#2a2218",
+          emissiveIntensity: 0.05,
+          roughness: 0.89,
+          flatShading: true,
+        }),
+],
       rock: new THREE.MeshStandardMaterial({
         color: "#4a4036",
         emissive: "#1a1612",
@@ -346,30 +438,87 @@ export function SkyEscort({ color }: { color: string }) {
     setLevelIdx(next);
   }
 
-  function buildTerrain() {
+  
+  function spawnPickups(L: LevelDef) {
+    const list: Pickup[] = [];
+    // Sparse boost pads along the route — infrastructure for richer upgrades later.
+    const pads = 2 + Math.min(3, Math.floor(levelIdxRef.current / 2));
+    for (let i = 0; i < pads; i++) {
+      const tAlong = 0.25 + (i / Math.max(1, pads)) * 0.55;
+      const zz = L.startZ + (L.endZ - L.startZ) * tAlong;
+      const xx = ((i % 2 === 0 ? 1 : -1) * (8 + (i % 3) * 5));
+      const h = sampleGroundH(xx, zz, L.startZ, L.endZ);
+      list.push({
+        id: nextId.current++,
+        kind: i === 0 && levelIdxRef.current > 0 ? (["boost", "armor", "radar", "turret"] as UpgradeId[])[levelIdxRef.current % 4] : "boost",
+        x: xx,
+        y: terraceTop(h / TERRACE_STEP) + 0.6,
+        z: zz,
+        taken: false,
+      });
+    }
+    pickups.current = list;
+  }
+
+  function applyPickup(kind: UpgradeId) {
+    const L = loadout.current;
+    if (kind === "boost") {
+      L.boostMax = Math.min(3, L.boostMax + 1);
+      L.boostCharges = Math.min(L.boostMax, L.boostCharges + 1);
+    } else if (kind === "armor") {
+      L.armorBonus = Math.min(2, L.armorBonus + 1);
+      hullRef.current = Math.min(activeLevel().hull + L.armorBonus, hullRef.current + 1);
+      setHull(hullRef.current);
+    } else if (kind === "radar") {
+      L.radar = true;
+    } else if (kind === "turret") {
+      L.turretRate = Math.min(1.75, L.turretRate + 0.25);
+    }
+    setLoadoutHud({ ...L });
+    setClearBanner(UPGRADE_LABEL[kind]);
+    clearBannerT.current = 1.6;
+  }
+
+  function tryBoost() {
+    if (phaseRef.current !== "run" || seatRef.current !== "driver") return;
+    if (boostTimer.current > 0) return;
+    if (loadout.current.boostCharges <= 0) return;
+    loadout.current.boostCharges -= 1;
+    boostTimer.current = 1.35;
+    setLoadoutHud({ ...loadout.current });
+    setClearBanner("BOOST");
+    clearBannerT.current = 0.9;
+  }
+
+function buildTerrain() {
     const L = activeLevel();
     const list: Tile[] = [];
     let id = 1;
-    // Snap grid to tile size so slabs stay edge-flush.
     const x0 = -Math.ceil(L.halfW / L.tile) * L.tile;
     const x1 = Math.ceil(L.halfW / L.tile) * L.tile;
     const z0 = Math.ceil((L.startZ + L.tile) / L.tile) * L.tile;
-    // Extra rows past the gate so finish pad has solid ground.
     const z1 = Math.floor((L.endZ - L.tile * 4) / L.tile) * L.tile;
     for (let zz = z0; zz >= z1; zz -= L.tile) {
       for (let xx = x0; xx <= x1; xx += L.tile) {
         const finish =
           zz <= L.endZ + L.tile * 1.5 && zz >= L.endZ - L.tile * 2.5 && Math.abs(xx) <= L.tile * 3;
-        // Flat runway near spawn so you don't start on a cliff edge.
         const nearStart = zz >= L.startZ - L.tile * 2;
-        let elev = terraceIndex(xx, zz, L.startZ, L.endZ);
-        if (finish || nearStart) elev = Math.min(elev, 1);
+        let elev = terraceBlended(xx, zz, L.startZ, L.endZ);
+        if (finish || nearStart) elev = Math.min(elev, 1.05);
         const h = elev * TERRACE_STEP;
-        const shade = finish ? 0 : elev;
-        list.push({ id: id++, x: xx, z: zz, drop: 0, gone: false, h, shade, safe: finish });
+        // Slope from neighbor heights (angled ramps between shelves).
+        const hn = sampleGroundH(xx, zz - L.tile, L.startZ, L.endZ);
+        const hs = sampleGroundH(xx, zz + L.tile, L.startZ, L.endZ);
+        const he = sampleGroundH(xx + L.tile, zz, L.startZ, L.endZ);
+        const hw = sampleGroundH(xx - L.tile, zz, L.startZ, L.endZ);
+        const pitch = finish || nearStart ? 0 : Math.atan2(hs - hn, L.tile * 2);
+        const roll = finish || nearStart ? 0 : Math.atan2(hw - he, L.tile * 2);
+        const shade = finish ? 0 : Math.min(TERRACE_COUNT - 1, Math.round(elev));
+        list.push({ id: id++, x: xx, z: zz, drop: 0, gone: false, h, shade, pitch, roll, safe: finish });
       }
     }
     tiles.current = list;
+    spawnPickups(L);
   }
 
   function snapSeatCam(role: Role) {
@@ -418,7 +567,7 @@ export function SkyEscort({ color }: { color: string }) {
     falling.current = false;
     keys.current = { throttle: 0, steer: 0 };
     z.current = Math.min(z.current, activeLevel().endZ);
-    introT.current = 2.6;
+    introT.current = 3.4;
     introNextRef.current = next;
     setIntroLevel({ idx: next, name: nextL.name });
     setPhaseBoth("intro");
@@ -475,6 +624,10 @@ export function SkyEscort({ color }: { color: string }) {
     blasts.current = [];
     meteorAcc.current = -0.35;
     alienAcc.current = -0.8;
+    boostTimer.current = 0;
+    // Keep upgrades across levels; top off one boost charge each clear.
+    loadout.current.boostCharges = Math.min(loadout.current.boostMax, loadout.current.boostCharges + 1);
+    setLoadoutHud({ ...loadout.current });
     buildTerrain();
     shakeRef.current = 0;
     failCueT.current = 0;
@@ -570,6 +723,9 @@ export function SkyEscort({ color }: { color: string }) {
         if (e.code === "KeyD" || e.code === "ArrowRight") keys.current.steer = -1;
       }
       if (seatRef.current === "gunner" && (e.code === "Space" || e.code === "KeyF")) fireHeld.current = true;
+      if (seatRef.current === "driver" && (e.code === "ShiftLeft" || e.code === "ShiftRight" || e.code === "KeyB")) {
+        tryBoost();
+      }
     };
 
     const up = (e: KeyboardEvent) => {
@@ -632,8 +788,9 @@ export function SkyEscort({ color }: { color: string }) {
         if (data.phase === "intro" && !isHost) {
           const idx = levelIndexFromId(data.levelId);
           const L = makeLevel(idx);
+          introNextRef.current = idx;
           setIntroLevel({ idx, name: L.name });
-          introT.current = 2.6;
+          introT.current = 3.4;
           advancing.current = true;
           setPhaseBoth("intro");
         }
@@ -734,7 +891,9 @@ export function SkyEscort({ color }: { color: string }) {
 
       if (!falling.current) {
         yaw.current += steer * level.turnRate * clamped * (0.55 + Math.min(1, Math.abs(speed.current) / 10));
-        const target = throttle * level.driveSpeed * (0.85 + progress * 0.35);
+        if (boostTimer.current > 0) boostTimer.current = Math.max(0, boostTimer.current - clamped);
+        const boostMul = boostTimer.current > 0 ? 1.55 : 1;
+        const target = throttle * level.driveSpeed * boostMul * (0.85 + progress * 0.35);
         speed.current = THREE.MathUtils.damp(speed.current, target, 4.5, clamped);
         const crawl = throttle === 0 ? level.driveSpeed * 0.22 : 0;
         const v = speed.current + crawl;
@@ -774,9 +933,23 @@ export function SkyEscort({ color }: { color: string }) {
           }
         }
       } else {
-        const elev = under ? Math.round((under.h ?? 0) / TERRACE_STEP) : 1;
-        const targetY = under ? terraceTop(elev) : terraceTop(1);
+        const elev = under ? (under.h ?? 0) / TERRACE_STEP : 1;
+        const targetY = under ? terraceTop(elev) + Math.tan(under.pitch ?? 0) * 0.15 : terraceTop(1);
         y.current = THREE.MathUtils.damp(y.current, targetY, 10, clamped);
+        if (under && buggy.current && !falling.current) {
+          buggy.current.rotation.x = THREE.MathUtils.damp(buggy.current.rotation.x, under.pitch ?? 0, 8, clamped);
+        }
+      }
+
+      
+      // Pickup pads (boost / upgrade scaffolding)
+      for (const pk of pickups.current) {
+        if (pk.taken) continue;
+        if (Math.hypot(pk.x - x.current, pk.z - z.current) < 2.2) {
+          pk.taken = true;
+          applyPickup(pk.kind);
+          addBlast(pk.x, pk.y, pk.z);
+        }
       }
 
       meteorAcc.current += clamped;
@@ -937,7 +1110,7 @@ export function SkyEscort({ color }: { color: string }) {
       }
 
       snapAcc.current += clamped;
-      if (!instanceId.startsWith("local:") && snapAcc.current >= 1 / 15) {
+      if (!instanceId.startsWith("local:") && phaseRef.current === "run" && snapAcc.current >= 1 / 15) {
         snapAcc.current = 0;
         emitMinigame(instanceId, "sky-escort", {
           type: "snap",
@@ -990,17 +1163,18 @@ export function SkyEscort({ color }: { color: string }) {
       tiles.current,
       (t, mesh) => {
         mesh.visible = !t.gone;
-        const elev = Math.round((t.h ?? 0) / TERRACE_STEP);
-        const thick = terraceTop(elev); // base+steps — flat terrace stacks
-        // Full tile size with tiny overlap so slabs touch — no gaps.
-        mesh.scale.set(level.tile * 1.01, thick, level.tile * 1.01);
-        mesh.position.set(t.x, thick * 0.5 - t.drop, t.z);
-        mesh.rotation.z = t.drop > 0 ? t.drop * 0.04 * Math.sign(t.x || 1) : 0;
-        mesh.rotation.x = t.drop > 0 ? t.drop * 0.02 : 0;
+        const elev = (t.h ?? 0) / TERRACE_STEP;
+        const elevRound = Math.min(TERRACE_COUNT - 1, Math.max(0, Math.round(elev)));
+        const thick = terraceTop(elev); // continuous height incl. slope blend
+        mesh.scale.set(level.tile * 1.01, Math.max(0.45, thick), level.tile * 1.01);
+        mesh.position.set(t.x, Math.max(0.45, thick) * 0.5 - t.drop, t.z);
+        // Angled slopes between terrace shelves
+        mesh.rotation.x = t.drop > 0 ? t.drop * 0.02 : (t.pitch ?? 0);
+        mesh.rotation.z = t.drop > 0 ? t.drop * 0.04 * Math.sign(t.x || 1) : (t.roll ?? 0);
         if (t.drop > 0) mesh.material = mats.dirtHot;
         else if (t.safe) mesh.material = mats.finish;
-        else if (elev >= 4) mesh.material = mats.rock;
-        else mesh.material = mats.dirt[elev % mats.dirt.length];
+        else if (elevRound >= TERRACE_COUNT - 2) mesh.material = mats.rock;
+        else mesh.material = mats.dirt[elevRound % mats.dirt.length];
       },
       () => new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mats.dirt[0]),
     );
@@ -1047,6 +1221,47 @@ export function SkyEscort({ color }: { color: string }) {
       },
       () => new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 8), mats.blast.clone()),
     );
+
+
+    syncGroup(
+      pickupGroup.current,
+      pickups.current.filter((pk) => !pk.taken),
+      (pk, mesh) => {
+        mesh.visible = true;
+        mesh.position.set(pk.x, pk.y + Math.sin(performance.now() * 0.004 + pk.id) * 0.15, pk.z);
+        mesh.rotation.y += clamped * 1.8;
+      },
+      () => {
+        const m = new THREE.Mesh(
+          new THREE.OctahedronGeometry(0.55),
+          new THREE.MeshStandardMaterial({ color: "#80d8ff", emissive: "#40c4ff", emissiveIntensity: 1.4 }),
+        );
+        return m;
+      },
+    );
+
+    // Gate beacon + heading chevron — always show where to drive
+    if (gateBeacon.current) {
+      const gh = terraceTop(sampleGroundH(0, level.endZ, level.startZ, level.endZ) / TERRACE_STEP);
+      gateBeacon.current.position.set(0, gh + 4.5 + Math.sin(performance.now() * 0.003) * 0.35, level.endZ);
+      gateBeacon.current.visible = phaseRef.current === "run" || phaseRef.current === "intro";
+    }
+    if (headingArrow.current && phaseRef.current === "run") {
+      const dx = 0 - x.current;
+      const dz = level.endZ - z.current;
+      const ang = Math.atan2(dx, dz);
+      const dist = Math.hypot(dx, dz);
+      const ahead = Math.min(14, Math.max(6, dist * 0.18));
+      headingArrow.current.visible = dist > 12;
+      headingArrow.current.position.set(
+        x.current + Math.sin(ang) * ahead,
+        y.current + 2.2,
+        z.current + Math.cos(ang) * ahead,
+      );
+      headingArrow.current.rotation.set(0.35, ang, 0);
+    } else if (headingArrow.current) {
+      headingArrow.current.visible = false;
+    }
 
     const sh = shakeRef.current;
     const ox = (Math.random() - 0.5) * sh;
@@ -1120,6 +1335,28 @@ export function SkyEscort({ color }: { color: string }) {
       <group ref={alienGroup} />
       <group ref={bulletGroup} />
       <group ref={blastGroup} />
+      <group ref={pickupGroup} />
+
+      {/* Gate direction beacon — tall pulse so you always know where to drive */}
+      <group ref={gateBeacon} position={[0, 6, level.endZ]}>
+        <mesh>
+          <cylinderGeometry args={[0.18, 0.35, 7, 8]} />
+          <meshStandardMaterial color="#ffe082" emissive="#ffd54f" emissiveIntensity={1.6} transparent opacity={0.85} />
+        </mesh>
+        <mesh position={[0, 4.2, 0]}>
+          <sphereGeometry args={[0.55, 12, 12]} />
+          <meshStandardMaterial color="#fff8e1" emissive="#ffab40" emissiveIntensity={2.2} />
+        </mesh>
+        <pointLight color="#ffd54f" intensity={22} distance={36} />
+      </group>
+
+      {/* Floating chevron that points toward the gate */}
+      <group ref={headingArrow} visible={false}>
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <coneGeometry args={[0.7, 2.2, 3]} />
+          <meshStandardMaterial color="#ffab40" emissive="#ff6d00" emissiveIntensity={1.5} />
+        </mesh>
+      </group>
 
       <group ref={buggy} position={[0, 0.85, level.startZ]} rotation={[0, Math.PI, 0]}>
         {/* chunky offroad buggy — ground trek, not a plane */}
@@ -1180,10 +1417,10 @@ export function SkyEscort({ color }: { color: string }) {
             <div className="sky-escort-intro" aria-live="polite">
               <div className="sky-escort-intro-scan" />
               <div className="sky-escort-intro-glow" />
-              <p className="sky-escort-intro-kicker">Incoming sector</p>
+              <p className="sky-escort-intro-kicker">Next sector</p>
               <p className="sky-escort-intro-num">LEVEL {introLevel.idx + 1}</p>
               <h2 className="sky-escort-intro-name">{introLevel.name}</h2>
-              <p className="sky-escort-intro-sub">Hold on — rolling out</p>
+              <p className="sky-escort-intro-sub">Sector locked — rolling out</p>
               <div className="sky-escort-intro-bar">
                 <span />
               </div>
@@ -1242,7 +1479,9 @@ export function SkyEscort({ color }: { color: string }) {
                 </p>
                 {clearBanner ? <p className="sky-escort-alert">{clearBanner}</p> : failCue ? <p className="sky-escort-alert">METEOR IMPACT</p> : null}
                 <p className="sky-escort-hint">
-                  {seat === "driver" ? "WASD trek · dodge meteor craters" : "Mouse aim · click / Space fire"}
+                  {seat === "driver"
+                    ? `WASD trek · Shift boost (${loadoutHud.boostCharges}/${loadoutHud.boostMax}) · follow the beacon`
+                    : "Mouse aim · click / Space fire"}
                 </p>
               </>
             )}
