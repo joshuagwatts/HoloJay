@@ -782,7 +782,7 @@ kbd {
   height: 100%;
   width: 40%;
   background: linear-gradient(90deg, #ff7043, #ffd54f);
-  animation: sky-intro-bar 2.4s ease-in-out forwards;
+  animation: sky-intro-bar 1.7s ease-in-out forwards;
 }
 
 @keyframes sky-intro-in {
@@ -927,4 +927,18 @@ kbd {
   inset: 0;
   border: 1px solid rgba(255, 171, 64, 0.55);
   border-radius: 50%;
+}
+
+.sky-escort-crosshair.hit {
+  opacity: 1;
+  transform: scale(1.35);
+  filter: brightness(1.6);
+}
+
+.sky-escort-crosshair.hit .sky-escort-crosshair-h,
+.sky-escort-crosshair.hit .sky-escort-crosshair-v,
+.sky-escort-crosshair.hit .sky-escort-crosshair-ring {
+  background: #fff8e1;
+  border-color: #fff8e1;
+  box-shadow: 0 0 14px rgba(255, 213, 79, 0.95);
 }

@@ -39,17 +39,52 @@ function makeLevel(n: number): LevelDef {
   return {
     id: `run-${t}`,
     name: LEVEL_NAMES[t] ?? `Wave ${t + 1}`,
-    startZ: 22 + Math.min(soft, 10) * 1.5,
-    endZ: -(70 + soft * 36),
-    halfW: 46 + Math.min(soft, 14) * 2,
+    startZ: 24 + Math.min(soft, 10) * 1.4,
+    // Longer early runs so the fight has room to breathe (~12–16s L0).
+    endZ: -(110 + soft * 30),
+    halfW: 38 + Math.min(soft, 14) * 1.8,
     tile: 5,
     hull: 3 + (soft >= 6 ? 1 : 0) + (soft >= 14 ? 1 : 0),
-    driveSpeed: 15 + Math.min(soft, 16) * 0.48,
-    turnRate: 2.2,
-    // Level 0 already has pressure; denser each clear.
-    meteorEvery: Math.max(0.28, 1.15 - soft * 0.045),
-    alienEvery: Math.max(0.42, 1.85 - soft * 0.06),
+    driveSpeed: 19 + Math.min(soft, 16) * 0.55,
+    turnRate: 2.55,
+    // Early pressure is the whole point — don't wait until wave 10 to feel alive.
+    meteorEvery: Math.max(0.32, 0.92 - soft * 0.035),
+    alienEvery: Math.max(0.38, 0.95 - soft * 0.04),
   };
+}
+
+/** Tiny arcade one-shots — silence was killing the fantasy. */
+type SfxKind = "fire" | "kill" | "boom" | "boost" | "hurt" | "gate" | "hit";
+let sfxCtx: AudioContext | null = null;
+function playSfx(kind: SfxKind) {
+  try {
+    sfxCtx ??= new AudioContext();
+    if (sfxCtx.state === "suspended") void sfxCtx.resume();
+    const t0 = sfxCtx.currentTime;
+    const o = sfxCtx.createOscillator();
+    const g = sfxCtx.createGain();
+    o.connect(g);
+    g.connect(sfxCtx.destination);
+    const table: Record<SfxKind, { f: number; f2: number; dur: number; type: OscillatorType; vol: number }> = {
+      fire: { f: 420, f2: 180, dur: 0.05, type: "square", vol: 0.045 },
+      hit: { f: 880, f2: 440, dur: 0.06, type: "triangle", vol: 0.05 },
+      kill: { f: 660, f2: 1320, dur: 0.12, type: "sawtooth", vol: 0.07 },
+      boom: { f: 90, f2: 40, dur: 0.22, type: "sine", vol: 0.09 },
+      boost: { f: 220, f2: 520, dur: 0.18, type: "sawtooth", vol: 0.06 },
+      hurt: { f: 160, f2: 70, dur: 0.2, type: "square", vol: 0.08 },
+      gate: { f: 392, f2: 784, dur: 0.28, type: "triangle", vol: 0.08 },
+    };
+    const s = table[kind];
+    o.type = s.type;
+    o.frequency.setValueAtTime(s.f, t0);
+    o.frequency.exponentialRampToValueAtTime(Math.max(30, s.f2), t0 + s.dur);
+    g.gain.setValueAtTime(s.vol, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + s.dur);
+    o.start(t0);
+    o.stop(t0 + s.dur + 0.02);
+  } catch {
+    /* audio optional */
+  }
 }
 
 function levelIndexFromId(id: string | undefined): number {
@@ -289,6 +324,10 @@ export function SkyEscort({ color }: { color: string }) {
   const remoteInput = useRef<InputMsg | null>(null);
   const driverIdRef = useRef<string | null>(selfId);
   const gunnerIdRef = useRef<string | null>("ai");
+  const distScoreAcc = useRef(0);
+  const hitFlashT = useRef(0);
+  const [hitFlash, setHitFlash] = useState(false);
+  const fovKick = useRef(0);
 
   const tiles = useRef<Tile[]>([]);
   const meteors = useRef<Meteor[]>([]);
@@ -456,14 +495,20 @@ export function SkyEscort({ color }: { color: string }) {
     if (invuln.current > 0) return;
     hullRef.current = Math.max(0, hullRef.current - n);
     setHull(hullRef.current);
-    invuln.current = 1.05;
-    shakeRef.current = Math.max(shakeRef.current, 0.55);
+    invuln.current = 0.85;
+    shakeRef.current = Math.max(shakeRef.current, 0.85);
     addBlast(x.current, y.current + 0.4, z.current);
+    playSfx("hurt");
     if (hullRef.current <= 0) {
       setPhaseBoth("dead");
       // Snaps only run during "run" — push one last death snap so gunner/clients see it.
       broadcastSnap();
     }
+  }
+
+  function flashHit() {
+    hitFlashT.current = 0.12;
+    setHitFlash(true);
   }
 
   /** Bed-turret pivot — matches gunMount local pos on the open bed. */
@@ -555,10 +600,13 @@ export function SkyEscort({ color }: { color: string }) {
     if (boostTimer.current > 0) return;
     if (loadout.current.boostCharges <= 0) return;
     loadout.current.boostCharges -= 1;
-    boostTimer.current = 1.1;
+    boostTimer.current = 1.25;
+    fovKick.current = 1;
+    shakeRef.current = Math.max(shakeRef.current, 0.45);
     setLoadoutHud({ ...loadout.current });
     setClearBanner("BOOST");
-    clearBannerT.current = 0.9;
+    clearBannerT.current = 0.7;
+    playSfx("boost");
   }
 
 function buildTerrain() {
@@ -638,10 +686,11 @@ function buildTerrain() {
     falling.current = false;
     keys.current = { throttle: 0, steer: 0 };
     z.current = Math.min(z.current, activeLevel().endZ);
-    introT.current = 3.6;
+    introT.current = 1.9;
     introNextRef.current = next;
     setIntroLevel({ idx: next, name: nextL.name });
     addScore(hullRef.current * 50 + 200, `GATE +${hullRef.current * 50 + 200}`);
+    playSfx("gate");
     setPhaseBoth("intro");
     // Drop pointer lock so the motion graphic is obvious for both seats.
     document.exitPointerLock?.();
@@ -704,13 +753,26 @@ function buildTerrain() {
     aliens.current = [];
     bullets.current = [];
     blasts.current = [];
-    meteorAcc.current = -0.35;
-    alienAcc.current = -0.8;
+    meteorAcc.current = 0.55;
+    alienAcc.current = 0.7;
     boostTimer.current = 0;
+    distScoreAcc.current = 0;
+    fovKick.current = 0;
     // Keep upgrades across levels; top off one boost charge each clear.
     loadout.current.boostCharges = Math.min(loadout.current.boostMax, loadout.current.boostCharges + 1);
     setLoadoutHud({ ...loadout.current });
     buildTerrain();
+    // Seed dive ships so the first seconds aren't an empty commute.
+    const seedN = 2 + Math.min(2, Math.floor(nextLevelIdx / 4));
+    for (let i = 0; i < seedN; i++) {
+      aliens.current.push({
+        id: nextId.current++,
+        x: (Math.random() - 0.5) * 16,
+        y: 6 + Math.random() * 5,
+        z: L.startZ - 18 - i * 10 - Math.random() * 8,
+        hp: nextLevelIdx < 3 ? 1 : 2,
+      });
+    }
     shakeRef.current = 0;
     failCueT.current = 0;
     setFailCue(false);
@@ -779,8 +841,8 @@ function buildTerrain() {
       }
 
       if (p === "intro" && (e.code === "Space" || e.code === "Enter")) {
-        // Don't let a held Space (gunner fire) or accidental tap skip the graphic.
-        if (introT.current > 2.4) return;
+        // Brief lockout so a held fire key doesn't skip instantly.
+        if (introT.current > 1.35) return;
         e.preventDefault();
         finishIntro();
         return;
@@ -971,27 +1033,42 @@ function buildTerrain() {
       }
 
       if (driverIdRef.current === "ai") {
-        throttle = 0.9;
+        throttle = 0.95;
         const threat = meteors.current.find(
-          (m) => m.z < z.current + 12 && m.z > z.current - 2 && Math.abs(m.x - x.current) < 5,
+          (m) => m.z < z.current + 14 && m.z > z.current - 4 && Math.abs(m.x - x.current) < 6,
         );
-        if (threat) steer = threat.x > x.current ? 1 : -1;
-        else steer = x.current > 4 ? 0.4 : x.current < -4 ? -0.4 : 0;
+        const dive = aliens.current.find(
+          (a) => a.z < z.current + 10 && a.z > z.current - 6 && Math.abs(a.x - x.current) < 5 && a.y < 5,
+        );
+        if (dive) steer = dive.x > x.current ? -1 : 1;
+        else if (threat) steer = threat.x > x.current ? 1 : -1;
+        else steer = x.current > 5 ? 0.55 : x.current < -5 ? -0.55 : Math.sin(performance.now() * 0.001) * 0.15;
       }
 
       if (!falling.current) {
-        yaw.current += steer * level.turnRate * clamped * (0.55 + Math.min(1, Math.abs(speed.current) / 12));
+        // Freer steering when slow — Warthog fantasy, not a boat.
+        const steerScale = 0.85 + Math.min(0.35, Math.abs(speed.current) / 28);
+        yaw.current += steer * level.turnRate * clamped * steerScale;
         if (boostTimer.current > 0) boostTimer.current = Math.max(0, boostTimer.current - clamped);
-        const boostMul = boostTimer.current > 0 ? 1.38 : 1;
+        const boostMul = boostTimer.current > 0 ? 1.55 : 1;
         const target =
           throttle === 0
-            ? 0
-            : throttle * level.driveSpeed * boostMul * (0.88 + progress * 0.28);
-        speed.current = THREE.MathUtils.damp(speed.current, target, throttle === 0 ? 2.8 : 7.2, clamped);
+            ? speed.current * 0.15 // light coast, not an instant brick
+            : throttle * level.driveSpeed * boostMul * (0.92 + progress * 0.22);
+        speed.current = THREE.MathUtils.damp(speed.current, target, throttle === 0 ? 1.6 : 8.5, clamped);
         const v = speed.current;
         x.current += Math.sin(yaw.current) * v * clamped;
         z.current += Math.cos(yaw.current) * v * clamped;
         x.current = THREE.MathUtils.clamp(x.current, -level.halfW + 2.5, level.halfW - 2.5);
+        // Driver gets drip score for meters burned — seat isn't just a taxi.
+        if (Math.abs(v) > 4) {
+          distScoreAcc.current += Math.abs(v) * clamped * 0.45;
+          if (distScoreAcc.current >= 5) {
+            const pts = Math.floor(distScoreAcc.current);
+            distScoreAcc.current -= pts;
+            addScore(pts);
+          }
+        }
       }
 
       // Terrain only blows when meteors land — no random collapse.
@@ -1045,17 +1122,21 @@ function buildTerrain() {
       }
 
       meteorAcc.current += clamped;
-      const meteorEvery = Math.max(0.28, level.meteorEvery - progress * Math.min(0.45, 0.2 + levelIdxRef.current * 0.03));
+      const meteorEvery = Math.max(0.32, level.meteorEvery - progress * Math.min(0.35, 0.15 + levelIdxRef.current * 0.025));
       if (meteorAcc.current >= meteorEvery) {
         meteorAcc.current = 0;
+        // Bias impacts toward the truck corridor so they matter.
+        const near = Math.random() < 0.62;
         meteors.current.push({
           id: nextId.current++,
-          x: x.current + (Math.random() - 0.5) * level.halfW * 1.6,
-          y: 15 + Math.random() * 10,
-          z: z.current - 8 - Math.random() * 48,
-          vx: (Math.random() - 0.5) * 4,
-          vy: -15 - progress * 12,
-          vz: 2 + Math.random() * 5,
+          x: near
+            ? x.current + (Math.random() - 0.5) * 14
+            : x.current + (Math.random() - 0.5) * level.halfW * 1.2,
+          y: 14 + Math.random() * 8,
+          z: z.current - 6 - Math.random() * 36,
+          vx: (Math.random() - 0.5) * 5,
+          vy: -17 - progress * 10,
+          vz: 3 + Math.random() * 6,
         });
       }
       for (const m of meteors.current) {
@@ -1064,11 +1145,15 @@ function buildTerrain() {
         m.z += m.vz * clamped;
         if (m.y < 0.3) {
           addBlast(m.x, 0.45, m.z);
-          shakeRef.current = Math.max(shakeRef.current, 0.55);
-          failCueT.current = 1.4;
-          setFailCue(true);
+          const nearTruck = Math.hypot(m.x - x.current, m.z - z.current) < 11;
+          if (nearTruck) {
+            shakeRef.current = Math.max(shakeRef.current, 0.7);
+            failCueT.current = 0.9;
+            setFailCue(true);
+            playSfx("boom");
+          }
           // Crater: impact tile + neighbors
-          const craterR = level.tile * 1.15;
+          const craterR = level.tile * 1.05;
           for (const t of tiles.current) {
             if (t.gone || t.drop > 0 || t.safe) continue;
             if (Math.hypot(t.x - m.x, t.z - m.z) < craterR) t.drop = 0.01;
@@ -1084,15 +1169,21 @@ function buildTerrain() {
       meteors.current = meteors.current.filter((m) => m.y > -20 && m.z < z.current + 40);
 
       alienAcc.current += clamped;
-      if (alienAcc.current >= Math.max(0.45, level.alienEvery - progress * 0.7)) {
+      const alienEvery = Math.max(0.36, level.alienEvery - progress * 0.55);
+      if (alienAcc.current >= alienEvery) {
         alienAcc.current = 0;
-        aliens.current.push({
-          id: nextId.current++,
-          x: x.current + (Math.random() - 0.5) * level.halfW * 1.2,
-          y: 6 + Math.random() * 9,
-          z: z.current - 20 - Math.random() * 50,
-          hp: 2,
-        });
+        // Wave packs: sometimes drop a pair so the sky feels busy.
+        const pack = Math.random() < 0.35 + Math.min(0.35, levelIdxRef.current * 0.04) ? 2 : 1;
+        for (let i = 0; i < pack; i++) {
+          aliens.current.push({
+            id: nextId.current++,
+            x: x.current + (Math.random() - 0.5) * Math.min(28, level.halfW),
+            y: 5 + Math.random() * 7,
+            z: z.current - 12 - Math.random() * 34 - i * 4,
+            // Early ships pop in one shot; later get tankier.
+            hp: levelIdxRef.current < 3 ? 1 : levelIdxRef.current < 10 ? 2 : 3,
+          });
+        }
       }
 
       const muzzle = muzzleWorld();
@@ -1101,9 +1192,11 @@ function buildTerrain() {
 
       if (gunIsAi && aliens.current[0] && fireCd.current <= 0) {
         const t = aliens.current[0];
-        const dx = t.x - muzzle.x;
-        const dy = t.y - muzzle.y;
-        const dz = t.z - muzzle.z;
+        // AI is backup, not a laser — miss often so diving ships stay dramatic for the driver.
+        const miss = Math.random() < 0.42;
+        const dx = t.x - muzzle.x + (miss ? (Math.random() - 0.5) * 8 : (Math.random() - 0.5) * 1.2);
+        const dy = t.y - muzzle.y + (miss ? (Math.random() - 0.5) * 4 : 0);
+        const dz = t.z - muzzle.z + (miss ? (Math.random() - 0.5) * 6 : 0);
         const len = Math.hypot(dx, dy, dz) || 1;
         bullets.current.push({
           id: nextId.current++,
@@ -1114,15 +1207,16 @@ function buildTerrain() {
           dy: dy / len,
           dz: dz / len,
         });
-        fireCd.current = 0.26;
+        fireCd.current = 0.34;
+        playSfx("fire");
       }
 
       if (!gunIsAi) {
         if (seatRef.current === "gunner") {
-          gunYaw.current -= lookQ.current.x * 0.0024;
-          gunPitch.current = Math.max(-0.35, Math.min(0.85, gunPitch.current - lookQ.current.y * 0.002));
-          lookQ.current.x *= 0.2;
-          lookQ.current.y *= 0.2;
+          gunYaw.current -= lookQ.current.x * 0.0032;
+          gunPitch.current = Math.max(-0.4, Math.min(0.9, gunPitch.current - lookQ.current.y * 0.0028));
+          lookQ.current.x *= 0.08;
+          lookQ.current.y *= 0.08;
         }
         if (rin?.role === "gunner") {
           if (typeof rin.yaw === "number") gunYaw.current = rin.yaw;
@@ -1145,15 +1239,18 @@ function buildTerrain() {
             dy: sp,
             dz: cy * cp,
           });
-          fireCd.current = 0.14 / Math.max(0.85, loadout.current.turretRate);
+          fireCd.current = 0.11 / Math.max(0.85, loadout.current.turretRate);
+          shakeRef.current = Math.max(shakeRef.current, 0.18);
+          playSfx("fire");
+          addBlast(tip.x, tip.y, tip.z);
         }
       }
 
       if (!gunIsAi && seatRef.current === "gunner" && !isHost) {
-        gunYaw.current -= lookQ.current.x * 0.0024;
-        gunPitch.current = Math.max(-0.35, Math.min(0.85, gunPitch.current - lookQ.current.y * 0.002));
-        lookQ.current.x *= 0.2;
-        lookQ.current.y *= 0.2;
+        gunYaw.current -= lookQ.current.x * 0.0032;
+        gunPitch.current = Math.max(-0.4, Math.min(0.9, gunPitch.current - lookQ.current.y * 0.0028));
+        lookQ.current.x *= 0.08;
+        lookQ.current.y *= 0.08;
         gunSendAcc.current += clamped;
         if (gunSendAcc.current > 0.05) {
           gunSendAcc.current = 0;
@@ -1168,25 +1265,32 @@ function buildTerrain() {
       }
 
       for (const b of bullets.current) {
-        b.x += b.dx * 60 * clamped;
-        b.y += b.dy * 60 * clamped;
-        b.z += b.dz * 60 * clamped;
+        b.x += b.dx * 72 * clamped;
+        b.y += b.dy * 72 * clamped;
+        b.z += b.dz * 72 * clamped;
       }
       for (const a of aliens.current) {
-        a.x += (x.current - a.x) * 0.32 * clamped;
-        a.y += (1.8 - a.y) * 0.24 * clamped;
-        a.z += (z.current - a.z) * 0.42 * clamped + 5 * clamped;
+        const dist = Math.hypot(a.x - x.current, a.z - z.current);
+        const diveMul = dist < 18 ? 1.55 : 1;
+        a.x += (x.current - a.x) * 0.38 * diveMul * clamped;
+        a.y += (1.6 - a.y) * 0.3 * diveMul * clamped;
+        a.z += (z.current - a.z) * 0.48 * diveMul * clamped + 6.5 * clamped;
         for (const b of bullets.current) {
-          if (Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) < 1.4) {
+          if (Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) < 1.75) {
             a.hp -= 1;
             b.z = 9999;
             addBlast(a.x, a.y, a.z);
+            flashHit();
+            playSfx("hit");
+            shakeRef.current = Math.max(shakeRef.current, 0.35);
             if (a.hp <= 0) {
-              streakT.current = 4;
+              streakT.current = 4.5;
               killStreak.current += 1;
               const mult = 1 + Math.min(4, Math.floor((killStreak.current - 1) / 3)) * 0.25;
-              const pts = Math.round(100 * mult);
+              const pts = Math.round(120 * mult);
               addScore(pts, killStreak.current > 1 ? `${killStreak.current}x +${pts}` : `+${pts}`);
+              playSfx("kill");
+              shakeRef.current = Math.max(shakeRef.current, 0.75);
             }
           }
         }
@@ -1248,18 +1352,24 @@ function buildTerrain() {
     }
 
     if (phaseRef.current === "run" && !isHost && seatRef.current === "gunner") {
-      gunYaw.current -= lookQ.current.x * 0.0024;
-      gunPitch.current = Math.max(-0.35, Math.min(0.85, gunPitch.current - lookQ.current.y * 0.002));
-      lookQ.current.x *= 0.2;
-      lookQ.current.y *= 0.2;
+      gunYaw.current -= lookQ.current.x * 0.0032;
+      gunPitch.current = Math.max(-0.4, Math.min(0.9, gunPitch.current - lookQ.current.y * 0.0028));
+      lookQ.current.x *= 0.08;
+      lookQ.current.y *= 0.08;
     }
 
-    shakeRef.current = Math.max(0, shakeRef.current - clamped * 1.5);
+    if (hitFlashT.current > 0) {
+      hitFlashT.current = Math.max(0, hitFlashT.current - clamped);
+      if (hitFlashT.current <= 0 && hitFlash) setHitFlash(false);
+    }
+
+    shakeRef.current = Math.max(0, shakeRef.current - clamped * 1.8);
+    fovKick.current = Math.max(0, fovKick.current - clamped * 1.4);
 
     if (buggy.current) {
       buggy.current.position.set(x.current, Math.max(y.current, -3), z.current);
       buggy.current.rotation.y = yaw.current;
-      buggy.current.rotation.z = keys.current.steer * -0.06;
+      buggy.current.rotation.z = keys.current.steer * -0.14;
     }
     if (gunMount.current) gunMount.current.rotation.y = gunYaw.current;
     if (gunPitchMount.current) {
@@ -1295,8 +1405,16 @@ function buildTerrain() {
       (m, mesh) => {
         mesh.visible = m.y > -10;
         mesh.position.set(m.x, m.y, m.z);
+        const mat = mesh.material as THREE.MeshStandardMaterial;
+        if (loadout.current.radar) {
+          mat.emissiveIntensity = 1.8 + Math.sin(performance.now() * 0.012 + m.id) * 0.4;
+          mat.emissive.set("#ff6d00");
+        } else {
+          mat.emissiveIntensity = 0.55;
+          mat.emissive.set("#ff6d00");
+        }
       },
-      () => new THREE.Mesh(new THREE.DodecahedronGeometry(0.55), mats.meteor),
+      () => new THREE.Mesh(new THREE.DodecahedronGeometry(0.55), mats.meteor.clone()),
     );
 
     syncGroup(
@@ -1309,6 +1427,14 @@ function buildTerrain() {
         mesh.rotation.x = Math.sin(performance.now() * 0.006 + a.id) * 0.35;
         const pulse = 1 + Math.sin(performance.now() * 0.01 + a.id) * 0.08;
         mesh.scale.set(1.15 * pulse, 0.85 * pulse, 1.45 * pulse);
+        const mat = mesh.material as THREE.MeshStandardMaterial;
+        if (loadout.current.radar) {
+          mat.emissiveIntensity = 2.4 + Math.sin(performance.now() * 0.02 + a.id) * 0.6;
+          mat.emissive.set("#ffab40");
+        } else {
+          mat.emissiveIntensity = 1.1;
+          mat.emissive.set("#00e5ff");
+        }
       },
       () =>
         new THREE.Mesh(
@@ -1429,7 +1555,7 @@ function buildTerrain() {
       // Local seat: slightly up + behind the ring (turret +Z aims vehicle-forward at yaw 0).
       const eye = gunEyeLocal.current.set(0, 0.58, -0.95);
       eye.applyQuaternion(quat);
-      camera.position.set(pivot.x + eye.x + ox * 0.06, pivot.y + eye.y + oy * 0.06, pivot.z + eye.z);
+      camera.position.set(pivot.x + eye.x + ox * 0.22, pivot.y + eye.y + oy * 0.22, pivot.z + eye.z);
       const dir = gunLookDir.current.set(sy * cp, sp, cy * cp);
       camera.lookAt(
         camera.position.x + dir.x * 48,
@@ -1439,7 +1565,7 @@ function buildTerrain() {
       // Cab/hood on layer 1 — hide so they never fill the gunner frame.
       camera.layers.set(0);
       if (persp.isPerspectiveCamera) {
-        persp.fov = 70;
+        persp.fov = THREE.MathUtils.damp(persp.fov, hitFlash ? 74 : 68, 10, clamped);
         persp.near = 0.08;
         persp.updateProjectionMatrix();
       }
@@ -1455,23 +1581,26 @@ function buildTerrain() {
         fpGun.current.visible = false;
         if (fpGun.current.parent === camera) camera.remove(fpGun.current);
       }
-      if (persp.isPerspectiveCamera && persp.fov !== 60) {
-        persp.fov = 60;
+      if (persp.isPerspectiveCamera) {
+        const boosting = boostTimer.current > 0 || fovKick.current > 0;
+        const want = phaseRef.current === "ready" ? 58 : boosting ? 74 : 58;
+        persp.fov = THREE.MathUtils.damp(persp.fov, want, 9, clamped);
         persp.near = 0.1;
         persp.updateProjectionMatrix();
       }
-      const back = phaseRef.current === "ready" ? 15 : 12;
+      const boostCam = boostTimer.current > 0 ? 0.85 : 1;
+      const back = phaseRef.current === "ready" ? 15 : 10.5 * boostCam;
       const tx = x.current - Math.sin(yaw.current) * back;
-      const ty = y.current + (phaseRef.current === "ready" ? 7.2 : 5.4);
+      const ty = y.current + (phaseRef.current === "ready" ? 7.2 : 4.6 + (boostTimer.current > 0 ? 0.6 : 0));
       const tz = z.current - Math.cos(yaw.current) * back;
       if (phaseRef.current === "ready") {
         camera.position.set(tx, ty, tz);
         camera.lookAt(x.current + Math.sin(yaw.current) * 18, 0.8, z.current + Math.cos(yaw.current) * 18);
       } else {
-        camera.position.x = THREE.MathUtils.damp(camera.position.x, tx + ox, 7, clamped);
-        camera.position.y = THREE.MathUtils.damp(camera.position.y, ty + oy, 7, clamped);
-        camera.position.z = THREE.MathUtils.damp(camera.position.z, tz, 7, clamped);
-        camera.lookAt(x.current + Math.sin(yaw.current) * 12, 1.0, z.current + Math.cos(yaw.current) * 12);
+        camera.position.x = THREE.MathUtils.damp(camera.position.x, tx + ox, 8, clamped);
+        camera.position.y = THREE.MathUtils.damp(camera.position.y, ty + oy, 8, clamped);
+        camera.position.z = THREE.MathUtils.damp(camera.position.z, tz, 8, clamped);
+        camera.lookAt(x.current + Math.sin(yaw.current) * 14, 1.0, z.current + Math.cos(yaw.current) * 14);
       }
     }
   });
@@ -1479,7 +1608,7 @@ function buildTerrain() {
   return (
     <group>
       <color attach="background" args={["#1a0e0a"]} />
-      <fog attach="fog" args={["#1a0e0a", 48, 175]} />
+      <fog attach="fog" args={["#1a0e0a", 36, 140]} />
       <ambientLight intensity={0.42} />
       <hemisphereLight args={["#ffcc80", "#2a1810", 0.55]} />
       <directionalLight
@@ -1709,7 +1838,7 @@ function buildTerrain() {
             </div>
           )}
           {phase === "run" && seat === "gunner" && (
-            <div className="sky-escort-crosshair" aria-hidden>
+            <div className={`sky-escort-crosshair${hitFlash ? " hit" : ""}`} aria-hidden>
               <span className="sky-escort-crosshair-h" />
               <span className="sky-escort-crosshair-v" />
               <span className="sky-escort-crosshair-ring" />
@@ -1728,8 +1857,8 @@ function buildTerrain() {
                 </p>
                 <p className="sky-escort-hint">
                   {seat === "driver"
-                    ? "WASD the pickup across terraced ash plains — meteors punch craters, follow the beacon"
-                    : "Bed turret — mouse aim over the open bed, hold fire on dive-bombers for points"}
+                    ? "WASD the pickup — dodge meteor craters, Shift-boost, follow the beacon"
+                    : "Bed turret — snap aim, shred dive-bombers for streaks"}
                 </p>
                 <div className="sky-escort-actions">
                   <button type="button" className={seat === "driver" ? "on" : ""} onClick={() => pickSeat("driver")}>
@@ -1772,8 +1901,8 @@ function buildTerrain() {
                 {clearBanner ? <p className="sky-escort-alert">{clearBanner}</p> : failCue ? <p className="sky-escort-alert">METEOR IMPACT</p> : null}
                 <p className="sky-escort-hint">
                   {seat === "driver"
-                    ? `WASD · Shift boost (${loadoutHud.boostCharges}/${loadoutHud.boostMax}) · ramps & beacon`
-                    : "Mouse aim · click / Space fire · +100 per dive ship"}
+                    ? `WASD · Shift boost (${loadoutHud.boostCharges}/${loadoutHud.boostMax}) · score ticks as you roll`
+                    : "Mouse aim · hold fire · streak kills · radar lights threats"}
                 </p>
               </>
             )}
