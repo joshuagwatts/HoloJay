@@ -301,6 +301,7 @@ export function SkyEscort({ color }: { color: string }) {
   const gunPitchMount = useRef<THREE.Group>(null);
   /** First-person gun hardware locked to camera — always fills the gunner FOV. */
   const fpGun = useRef<THREE.Group>(null);
+  const gunPivotWorld = useRef(new THREE.Vector3());
   const tileGroup = useRef<THREE.Group>(null);
   const meteorGroup = useRef<THREE.Group>(null);
   const alienGroup = useRef<THREE.Group>(null);
@@ -588,12 +589,12 @@ function buildTerrain() {
       gunYaw.current = 0;
       gunPitch.current = 0.15;
       const t = turretWorld();
-      const eyeUp = 1.45;
-      camera.position.set(t.x, t.y + eyeUp, t.z + 0.2);
+      const eyeUp = 2.35;
+      camera.position.set(t.x, t.y + eyeUp, t.z + 0.15);
       camera.lookAt(
-        x.current + Math.sin(yaw.current) * 32,
-        t.y + eyeUp + 1.5,
-        z.current + Math.cos(yaw.current) * 32,
+        x.current + Math.sin(yaw.current) * 36,
+        t.y + eyeUp + 1.2,
+        z.current + Math.cos(yaw.current) * 36,
       );
     } else {
       const back = 12;
@@ -1398,29 +1399,41 @@ function buildTerrain() {
         persp.updateProjectionMatrix();
       }
     } else if (seatRef.current === "gunner" && phaseRef.current === "run") {
-      // High bed seat — eyes well above the cab so you see the field.
-      const t = turretWorld();
+      // Seat the camera on the real turret mesh (includes truck pitch) — not a flat yaw guess.
+      if (buggy.current) buggy.current.updateMatrixWorld(true);
+      const pivot = gunPivotWorld.current;
+      if (gunMount.current) gunMount.current.getWorldPosition(pivot);
+      else {
+        const t = turretWorld();
+        pivot.set(t.x, t.y, t.z);
+      }
       const aimYaw = yaw.current + gunYaw.current;
       const cy = Math.cos(aimYaw);
       const sy = Math.sin(aimYaw);
       const cp = Math.cos(gunPitch.current);
       const sp = Math.sin(gunPitch.current);
-      const eyeBack = 0.45;
-      const eyeUp = 1.45;
+      // Stand well above the ring — clear of cab, rails, and bed.
+      const eyeBack = 0.25;
+      const eyeUp = 2.35;
       camera.position.set(
-        t.x - sy * eyeBack + ox * 0.1,
-        t.y + eyeUp + oy * 0.1,
-        t.z - cy * eyeBack,
+        pivot.x - sy * eyeBack + ox * 0.08,
+        pivot.y + eyeUp + oy * 0.08,
+        pivot.z - cy * eyeBack,
       );
-      camera.lookAt(t.x + sy * cp * 45, t.y + eyeUp + sp * 45, t.z + cy * cp * 45);
+      camera.lookAt(
+        pivot.x + sy * cp * 55,
+        pivot.y + eyeUp + sp * 55,
+        pivot.z + cy * cp * 55,
+      );
       if (persp.isPerspectiveCamera) {
-        persp.fov = 64;
+        persp.fov = 68;
         persp.updateProjectionMatrix();
       }
       if (fpGun.current) {
         if (fpGun.current.parent !== camera) camera.add(fpGun.current);
         fpGun.current.visible = true;
-        fpGun.current.position.set(0, -0.62, -0.9);
+        // Keep hardware at the very bottom of the frame — never a tunnel.
+        fpGun.current.position.set(0, -0.92, -1.05);
         fpGun.current.rotation.set(0, 0, 0);
       }
     } else {
@@ -1636,59 +1649,24 @@ function buildTerrain() {
         </group>
       </group>
 
-      {/* FP turret — attached to camera while gunning so the seat always feels usable */}
+      {/* Slim FP iron — bottom of frame only (no cheek plates that read as a roof). */}
       <group ref={fpGun} visible={false}>
-        {/* low side cheeks — frame, don't block */}
-        <mesh position={[-0.7, -0.18, 0.1]}>
-          <boxGeometry args={[0.28, 0.42, 0.5]} />
-          <meshStandardMaterial color="#3e2723" metalness={0.55} roughness={0.45} />
+        <mesh position={[0, 0.06, -0.15]}>
+          <boxGeometry args={[0.03, 0.07, 0.03]} />
+          <meshStandardMaterial color="#ffab40" emissive="#ff6d00" emissiveIntensity={1.2} />
         </mesh>
-        <mesh position={[0.7, -0.18, 0.1]}>
-          <boxGeometry args={[0.28, 0.42, 0.5]} />
-          <meshStandardMaterial color="#3e2723" metalness={0.55} roughness={0.45} />
+        <mesh position={[0, -0.12, 0.05]}>
+          <boxGeometry args={[0.22, 0.14, 0.35]} />
+          <meshStandardMaterial color="#d7ccc8" metalness={0.8} roughness={0.25} />
         </mesh>
-        {/* wide gun shield with tall sight notch */}
-        <mesh position={[-0.36, -0.08, -0.08]}>
-          <boxGeometry args={[0.48, 0.32, 0.06]} />
-          <meshStandardMaterial color="#5d4037" metalness={0.6} roughness={0.4} />
+        <mesh position={[0, -0.1, -0.85]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.04, 0.055, 1.2, 8]} />
+          <meshStandardMaterial color="#cfd8dc" metalness={0.85} roughness={0.2} />
         </mesh>
-        <mesh position={[0.36, -0.08, -0.08]}>
-          <boxGeometry args={[0.48, 0.32, 0.06]} />
-          <meshStandardMaterial color="#5d4037" metalness={0.6} roughness={0.4} />
-        </mesh>
-        <mesh position={[0, 0.12, -0.06]}>
-          <boxGeometry args={[0.28, 0.1, 0.05]} />
-          <meshStandardMaterial color="#6d4c41" metalness={0.55} />
-        </mesh>
-        {/* iron sight post */}
-        <mesh position={[0, 0.02, -0.2]}>
-          <boxGeometry args={[0.035, 0.08, 0.035]} />
+        <mesh position={[0, -0.1, -1.45]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.07, 0.05, 0.14, 8]} />
           <meshStandardMaterial color="#ffab40" emissive="#ff6d00" emissiveIntensity={1.1} />
         </mesh>
-        {/* receiver */}
-        <mesh position={[0, -0.14, 0.02]}>
-          <boxGeometry args={[0.26, 0.2, 0.42]} />
-          <meshStandardMaterial color="#efebe9" metalness={0.8} roughness={0.25} />
-        </mesh>
-        {/* barrel — camera looks down -Z */}
-        <mesh position={[0, -0.12, -0.85]} rotation={[Math.PI / 2, 0, 0]}>
-          <cylinderGeometry args={[0.048, 0.065, 1.45, 10]} />
-          <meshStandardMaterial color="#d7ccc8" metalness={0.85} roughness={0.2} />
-        </mesh>
-        <mesh position={[0, -0.12, -1.58]} rotation={[Math.PI / 2, 0, 0]}>
-          <cylinderGeometry args={[0.085, 0.065, 0.16, 8]} />
-          <meshStandardMaterial color="#ffab40" emissive="#ff6d00" emissiveIntensity={1.2} metalness={0.6} />
-        </mesh>
-        {/* grips */}
-        <mesh position={[-0.2, -0.28, 0.12]} rotation={[0.55, 0, 0.25]}>
-          <cylinderGeometry args={[0.032, 0.032, 0.28, 6]} />
-          <meshStandardMaterial color="#3e2723" />
-        </mesh>
-        <mesh position={[0.2, -0.28, 0.12]} rotation={[0.55, 0, -0.25]}>
-          <cylinderGeometry args={[0.032, 0.032, 0.28, 6]} />
-          <meshStandardMaterial color="#3e2723" />
-        </mesh>
-        <pointLight position={[0, -0.05, -0.5]} color="#ffab40" intensity={3} distance={3.5} />
       </group>
 
       <Html fullscreen zIndexRange={[100, 0]} style={{ pointerEvents: phase === "ready" ? "auto" : "none" }}>
