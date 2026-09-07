@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { emitMinigame, onMinigame } from "../net/session.ts";
 import { useGame } from "../state/store.ts";
 
-/** Halo-3-finale vibe: ground buggy trek A→B over a dying plain. Not a runner. Not a plane. */
+/** Halo-3-finale vibe: pickup-truck trek A→B over a dying plain. Driver + bed gunner. */
 
 type LevelDef = {
   id: string;
@@ -44,8 +44,8 @@ function makeLevel(n: number): LevelDef {
     halfW: 46 + Math.min(soft, 14) * 2,
     tile: 5,
     hull: 3 + (soft >= 6 ? 1 : 0) + (soft >= 14 ? 1 : 0),
-    driveSpeed: 17 + Math.min(soft, 16) * 0.55,
-    turnRate: 2.05,
+    driveSpeed: 15 + Math.min(soft, 16) * 0.48,
+    turnRate: 2.2,
     // Level 0 already has pressure; denser each clear.
     meteorEvery: Math.max(0.28, 1.15 - soft * 0.045),
     alienEvery: Math.max(0.42, 1.85 - soft * 0.06),
@@ -166,6 +166,7 @@ type Snap = {
   type: "snap";
   phase: Phase;
   hull: number;
+  score: number;
   x: number;
   z: number;
   y: number;
@@ -240,6 +241,10 @@ export function SkyEscort({ color }: { color: string }) {
   const [seat, setSeat] = useState<Role>("driver");
   const [hull, setHull] = useState(level.hull);
   const [hudDist, setHudDist] = useState(0);
+  const [score, setScore] = useState(0);
+  const scoreRef = useRef(0);
+  const killStreak = useRef(0);
+  const streakT = useRef(0);
   const [failCue, setFailCue] = useState(false);
   const failCueT = useRef(0);
   const [clearBanner, setClearBanner] = useState<string | null>(null);
@@ -277,7 +282,7 @@ export function SkyEscort({ color }: { color: string }) {
   const snapAcc = useRef(0);
   const gunSendAcc = useRef(0);
   const gunYaw = useRef(0);
-  const gunPitch = useRef(-0.1);
+  const gunPitch = useRef(0.12);
   const fireHeld = useRef(false);
   const fireCd = useRef(0);
   const lookQ = useRef({ x: 0, y: 0 });
@@ -417,6 +422,7 @@ export function SkyEscort({ color }: { color: string }) {
       type: "snap",
       phase: phaseRef.current,
       hull: hullRef.current,
+      score: scoreRef.current,
       x: x.current,
       z: z.current,
       y: y.current,
@@ -451,12 +457,21 @@ export function SkyEscort({ color }: { color: string }) {
     }
   }
 
-  /** Rear cupola pivot in world space (matches gunMount local pos). */
+  /** Bed-turret pivot — rear of open truck bed, above the rails. */
   function turretWorld() {
-    const back = 2.05;
+    const back = 2.35;
     const ox = Math.sin(yaw.current) * -back;
     const oz = Math.cos(yaw.current) * -back;
-    return { x: x.current + ox, y: y.current + 1.55, z: z.current + oz };
+    return { x: x.current + ox, y: y.current + 1.85, z: z.current + oz };
+  }
+
+  function addScore(pts: number, label?: string) {
+    scoreRef.current += pts;
+    setScore(scoreRef.current);
+    if (label) {
+      setClearBanner(label);
+      clearBannerT.current = 1.1;
+    }
   }
 
   /** Muzzle tip along current aim — bullets leave here. */
@@ -531,7 +546,7 @@ export function SkyEscort({ color }: { color: string }) {
     if (boostTimer.current > 0) return;
     if (loadout.current.boostCharges <= 0) return;
     loadout.current.boostCharges -= 1;
-    boostTimer.current = 1.35;
+    boostTimer.current = 1.1;
     setLoadoutHud({ ...loadout.current });
     setClearBanner("BOOST");
     clearBannerT.current = 0.9;
@@ -571,24 +586,25 @@ function buildTerrain() {
   function snapSeatCam(role: Role) {
     if (role === "gunner") {
       gunYaw.current = 0;
-      gunPitch.current = -0.1;
+      gunPitch.current = 0.12;
       const t = turretWorld();
-      camera.position.set(t.x, t.y + 0.35, t.z);
+      const eyeUp = 0.55;
+      camera.position.set(t.x, t.y + eyeUp, t.z + 0.35);
       camera.lookAt(
-        x.current + Math.sin(yaw.current) * 20,
-        2,
-        z.current + Math.cos(yaw.current) * 20,
+        x.current + Math.sin(yaw.current) * 28,
+        t.y + eyeUp + 2.5,
+        z.current + Math.cos(yaw.current) * 28,
       );
     } else {
-      const back = 11;
+      const back = 12;
       camera.position.set(
         x.current - Math.sin(yaw.current) * back,
-        y.current + 5.2,
+        y.current + 5.6,
         z.current - Math.cos(yaw.current) * back,
       );
       camera.lookAt(
         x.current + Math.sin(yaw.current) * 14,
-        1.0,
+        1.2,
         z.current + Math.cos(yaw.current) * 14,
       );
     }
@@ -617,6 +633,7 @@ function buildTerrain() {
     introT.current = 3.4;
     introNextRef.current = next;
     setIntroLevel({ idx: next, name: nextL.name });
+    addScore(hullRef.current * 50 + 200, `GATE +${hullRef.current * 50 + 200}`);
     setPhaseBoth("intro");
     emitMinigame(instanceId, "sky-escort", {
       type: "role",
@@ -664,6 +681,14 @@ function buildTerrain() {
     invuln.current = 0;
     hullRef.current = L.hull;
     setHull(L.hull);
+    // Fresh attempt from ready / death resets score; level clears keep it.
+    if (nextLevelIdx === 0 || phaseRef.current === "dead" || phaseRef.current === "ready") {
+      if (phaseRef.current !== "intro") {
+        scoreRef.current = 0;
+        setScore(0);
+        killStreak.current = 0;
+      }
+    }
     keys.current = { throttle: 0, steer: 0 };
     meteors.current = [];
     aliens.current = [];
@@ -862,6 +887,10 @@ function buildTerrain() {
         setPhase(data.phase);
         hullRef.current = data.hull;
         setHull(data.hull);
+        if (typeof data.score === "number") {
+          scoreRef.current = data.score;
+          setScore(data.score);
+        }
         x.current = data.x;
         z.current = data.z;
         y.current = data.y;
@@ -937,13 +966,15 @@ function buildTerrain() {
       }
 
       if (!falling.current) {
-        yaw.current += steer * level.turnRate * clamped * (0.55 + Math.min(1, Math.abs(speed.current) / 10));
+        yaw.current += steer * level.turnRate * clamped * (0.55 + Math.min(1, Math.abs(speed.current) / 12));
         if (boostTimer.current > 0) boostTimer.current = Math.max(0, boostTimer.current - clamped);
-        const boostMul = boostTimer.current > 0 ? 1.55 : 1;
-        const target = throttle * level.driveSpeed * boostMul * (0.85 + progress * 0.35);
-        speed.current = THREE.MathUtils.damp(speed.current, target, 4.5, clamped);
-        const crawl = throttle === 0 ? level.driveSpeed * 0.22 : 0;
-        const v = speed.current + crawl;
+        const boostMul = boostTimer.current > 0 ? 1.38 : 1;
+        const target =
+          throttle === 0
+            ? 0
+            : throttle * level.driveSpeed * boostMul * (0.88 + progress * 0.28);
+        speed.current = THREE.MathUtils.damp(speed.current, target, throttle === 0 ? 2.8 : 7.2, clamped);
+        const v = speed.current;
         x.current += Math.sin(yaw.current) * v * clamped;
         z.current += Math.cos(yaw.current) * v * clamped;
         x.current = THREE.MathUtils.clamp(x.current, -level.halfW + 2.5, level.halfW - 2.5);
@@ -982,9 +1013,9 @@ function buildTerrain() {
       } else {
         const elev = under ? (under.h ?? 0) / TERRACE_STEP : 1;
         const targetY = under ? terraceTop(elev) + Math.tan(under.pitch ?? 0) * 0.15 : terraceTop(1);
-        y.current = THREE.MathUtils.damp(y.current, targetY, 10, clamped);
+        y.current = THREE.MathUtils.damp(y.current, targetY, 14, clamped);
         if (under && buggy.current && !falling.current) {
-          buggy.current.rotation.x = THREE.MathUtils.damp(buggy.current.rotation.x, under.pitch ?? 0, 8, clamped);
+          buggy.current.rotation.x = THREE.MathUtils.damp(buggy.current.rotation.x, under.pitch ?? 0, 9, clamped);
         }
       }
 
@@ -1075,7 +1106,7 @@ function buildTerrain() {
       if (!gunIsAi) {
         if (seatRef.current === "gunner") {
           gunYaw.current -= lookQ.current.x * 0.0024;
-          gunPitch.current = Math.max(-1.0, Math.min(0.55, gunPitch.current - lookQ.current.y * 0.002));
+          gunPitch.current = Math.max(-0.35, Math.min(0.85, gunPitch.current - lookQ.current.y * 0.002));
           lookQ.current.x *= 0.2;
           lookQ.current.y *= 0.2;
         }
@@ -1100,13 +1131,13 @@ function buildTerrain() {
             dy: sp,
             dz: cy * cp,
           });
-          fireCd.current = 0.14;
+          fireCd.current = 0.14 / Math.max(0.85, loadout.current.turretRate);
         }
       }
 
       if (!gunIsAi && seatRef.current === "gunner" && !isHost) {
         gunYaw.current -= lookQ.current.x * 0.0024;
-        gunPitch.current = Math.max(-1.0, Math.min(0.55, gunPitch.current - lookQ.current.y * 0.002));
+        gunPitch.current = Math.max(-0.35, Math.min(0.85, gunPitch.current - lookQ.current.y * 0.002));
         lookQ.current.x *= 0.2;
         lookQ.current.y *= 0.2;
         gunSendAcc.current += clamped;
@@ -1136,14 +1167,24 @@ function buildTerrain() {
             a.hp -= 1;
             b.z = 9999;
             addBlast(a.x, a.y, a.z);
+            if (a.hp <= 0) {
+              streakT.current = 4;
+              killStreak.current += 1;
+              const mult = 1 + Math.min(4, Math.floor((killStreak.current - 1) / 3)) * 0.25;
+              const pts = Math.round(100 * mult);
+              addScore(pts, killStreak.current > 1 ? `${killStreak.current}x +${pts}` : `+${pts}`);
+            }
           }
         }
         if (Math.hypot(a.x - x.current, a.z - z.current) < 1.9 && a.y < 2.6) {
           hurt(1);
           a.hp = 0;
+          killStreak.current = 0;
           addBlast(x.current, y.current, z.current);
         }
       }
+      streakT.current = Math.max(0, streakT.current - clamped);
+      if (streakT.current <= 0) killStreak.current = 0;
       aliens.current = aliens.current.filter((a) => a.hp > 0 && a.z < z.current + 35);
       bullets.current = bullets.current.filter((b) => b.z > level.endZ - 30 && b.y > -6 && b.y < 50);
 
@@ -1164,6 +1205,7 @@ function buildTerrain() {
           type: "snap",
           phase: phaseRef.current,
           hull: hullRef.current,
+          score: scoreRef.current,
           x: x.current,
           z: z.current,
           y: y.current,
@@ -1193,7 +1235,7 @@ function buildTerrain() {
 
     if (phaseRef.current === "run" && !isHost && seatRef.current === "gunner") {
       gunYaw.current -= lookQ.current.x * 0.0024;
-      gunPitch.current = Math.max(-1.0, Math.min(0.55, gunPitch.current - lookQ.current.y * 0.002));
+      gunPitch.current = Math.max(-0.35, Math.min(0.85, gunPitch.current - lookQ.current.y * 0.002));
       lookQ.current.x *= 0.2;
       lookQ.current.y *= 0.2;
     }
@@ -1203,7 +1245,7 @@ function buildTerrain() {
     if (buggy.current) {
       buggy.current.position.set(x.current, Math.max(y.current, -3), z.current);
       buggy.current.rotation.y = yaw.current;
-      buggy.current.rotation.z = keys.current.steer * -0.12;
+      buggy.current.rotation.z = keys.current.steer * -0.06;
     }
     if (gunMount.current) gunMount.current.rotation.y = gunYaw.current;
     if (gunPitchMount.current) {
@@ -1249,9 +1291,23 @@ function buildTerrain() {
       (a, mesh) => {
         mesh.visible = true;
         mesh.position.set(a.x, a.y, a.z);
-        mesh.scale.set(1.25, 0.5, 1.6);
+        mesh.rotation.y = performance.now() * 0.004 + a.id;
+        mesh.rotation.x = Math.sin(performance.now() * 0.006 + a.id) * 0.35;
+        const pulse = 1 + Math.sin(performance.now() * 0.01 + a.id) * 0.08;
+        mesh.scale.set(1.15 * pulse, 0.85 * pulse, 1.45 * pulse);
       },
-      () => new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.4, 5), mats.alien),
+      () =>
+        new THREE.Mesh(
+          new THREE.OctahedronGeometry(0.7, 0),
+          new THREE.MeshStandardMaterial({
+            color: "#7cfcff",
+            emissive: "#00e5ff",
+            emissiveIntensity: 1.6,
+            metalness: 0.35,
+            roughness: 0.35,
+            flatShading: true,
+          }),
+        ),
     );
 
     syncGroup(
@@ -1323,30 +1379,29 @@ function buildTerrain() {
     const persp = camera as THREE.PerspectiveCamera;
     const gunnerLive = seatRef.current === "gunner" && phaseRef.current !== "ready";
     if (gunnerLive) {
-      // Elevated cupola eyes — clear the cabin roof so the gunner can actually see.
+      // Standing in the truck bed behind the ring — clear sightlines over the low cab.
       const t = turretWorld();
       const aimYaw = yaw.current + gunYaw.current;
       const cy = Math.cos(aimYaw);
       const sy = Math.sin(aimYaw);
       const cp = Math.cos(gunPitch.current);
       const sp = Math.sin(gunPitch.current);
-      const eyeBack = 0.35;
-      const eyeUp = 1.05;
+      const eyeBack = 0.62;
+      const eyeUp = 0.55;
       camera.position.set(
-        t.x - sy * eyeBack + ox * 0.14,
-        t.y + eyeUp + oy * 0.14,
+        t.x - sy * eyeBack + ox * 0.12,
+        t.y + eyeUp + oy * 0.12,
         t.z - cy * eyeBack,
       );
-      camera.lookAt(t.x + sy * cp * 40, t.y + eyeUp + sp * 40, t.z + cy * cp * 40);
+      camera.lookAt(t.x + sy * cp * 42, t.y + eyeUp + sp * 42, t.z + cy * cp * 42);
       if (persp.isPerspectiveCamera) {
-        persp.fov = 58;
+        persp.fov = 62;
         persp.updateProjectionMatrix();
       }
-      // FP gun rides the camera — kept low so it frames the bottom, doesn't block sky.
       if (fpGun.current) {
         if (fpGun.current.parent !== camera) camera.add(fpGun.current);
         fpGun.current.visible = true;
-        fpGun.current.position.set(0, -0.48, -0.78);
+        fpGun.current.position.set(0, -0.52, -0.82);
         fpGun.current.rotation.set(0, 0, 0);
       }
     } else {
@@ -1376,11 +1431,19 @@ function buildTerrain() {
 
   return (
     <group>
-      <color attach="background" args={["#120806"]} />
-      <fog attach="fog" args={["#120806", 55, 200]} />
-      <ambientLight intensity={0.34} />
-      <directionalLight position={[12, 24, 6]} intensity={0.95} color="#ffcc80" />
-      <pointLight position={[x.current, 7, z.current]} color="#ff6a00" intensity={26} distance={55} />
+      <color attach="background" args={["#1a0e0a"]} />
+      <fog attach="fog" args={["#1a0e0a", 48, 175]} />
+      <ambientLight intensity={0.42} />
+      <hemisphereLight args={["#ffcc80", "#2a1810", 0.55]} />
+      <directionalLight
+        position={[14, 28, 8]}
+        intensity={1.15}
+        color="#ffe0b2"
+        castShadow
+        shadow-mapSize-width={1024}
+        shadow-mapSize-height={1024}
+      />
+      <pointLight position={[x.current, 8, z.current]} color="#ff6a00" intensity={22} distance={60} />
 
       {Array.from({ length: 30 }, (_, i) => (
         <mesh key={i} position={[(i % 8) * 7 - 24, 1.2 + (i % 5), -i * 3.4]}>
@@ -1441,116 +1504,110 @@ function buildTerrain() {
       </group>
 
       <group ref={buggy} position={[0, 0.85, level.startZ]} rotation={[0, Math.PI, 0]}>
-        {/* Warthog-style trek buggy: cabin forward, open rear gun deck */}
-        <mesh position={[0, 0.38, 0.15]} castShadow>
-          <boxGeometry args={[2.9, 0.55, 5.1]} />
-          <meshStandardMaterial color="#241c16" metalness={0.4} roughness={0.55} />
+        {/* Pickup truck: short low cab forward, open bed, ring turret aft */}
+        {/* chassis rail */}
+        <mesh position={[0, 0.32, -0.15]} castShadow>
+          <boxGeometry args={[2.7, 0.42, 5.6]} />
+          <meshStandardMaterial color="#1c1612" metalness={0.45} roughness={0.55} />
         </mesh>
-        {/* nose / hood */}
-        <mesh position={[0, 0.72, 1.55]} castShadow>
-          <boxGeometry args={[2.35, 0.55, 1.7]} />
-          <meshStandardMaterial color="#2a211a" metalness={0.45} roughness={0.5} />
+        {/* low cab — short so bed gunner sees over it */}
+        <mesh position={[0, 0.78, 1.55]} castShadow>
+          <boxGeometry args={[2.35, 0.55, 1.55]} />
+          <meshStandardMaterial color="#2a211a" metalness={0.4} roughness={0.5} />
         </mesh>
-        <mesh position={[0, 0.95, 1.35]}>
-          <boxGeometry args={[1.85, 0.22, 1.2]} />
-          <meshStandardMaterial color={color} emissive={color} emissiveIntensity={1.15} />
+        <mesh position={[0, 1.15, 1.45]} castShadow>
+          <boxGeometry args={[2.05, 0.55, 1.15]} />
+          <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.85} />
         </mesh>
-        {/* driver cockpit */}
-        <mesh position={[0, 1.15, 0.35]} castShadow>
-          <boxGeometry args={[1.85, 0.85, 1.55]} />
-          <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.95} />
+        <mesh position={[0, 1.45, 1.4]}>
+          <boxGeometry args={[1.85, 0.1, 1.0]} />
+          <meshStandardMaterial color="#100c09" metalness={0.65} roughness={0.35} />
         </mesh>
-        <mesh position={[0, 1.55, 0.2]}>
-          <boxGeometry args={[1.65, 0.12, 1.35]} />
-          <meshStandardMaterial color="#120e0b" metalness={0.65} roughness={0.35} />
+        {/* windshield lip only — no roll-cage roof */}
+        <mesh position={[0, 1.55, 1.85]}>
+          <boxGeometry args={[1.9, 0.08, 0.12]} />
+          <meshStandardMaterial color="#4e342e" metalness={0.5} />
         </mesh>
-        {/* roll cage over driver */}
-        <mesh position={[-0.82, 1.75, 0.25]}>
-          <boxGeometry args={[0.1, 1.05, 1.7]} />
-          <meshStandardMaterial color="#4e342e" metalness={0.55} />
+        {/* open truck bed */}
+        <mesh position={[0, 0.62, -1.15]} castShadow>
+          <boxGeometry args={[2.45, 0.16, 2.85]} />
+          <meshStandardMaterial color="#1a1410" metalness={0.55} roughness={0.6} />
         </mesh>
-        <mesh position={[0.82, 1.75, 0.25]}>
-          <boxGeometry args={[0.1, 1.05, 1.7]} />
-          <meshStandardMaterial color="#4e342e" metalness={0.55} />
+        {/* bed side rails — low, don't block gunner */}
+        <mesh position={[-1.15, 0.95, -1.15]}>
+          <boxGeometry args={[0.12, 0.55, 2.7]} />
+          <meshStandardMaterial color="#3e2723" metalness={0.5} />
         </mesh>
-        <mesh position={[0, 2.25, 0.25]}>
-          <boxGeometry args={[1.75, 0.1, 1.7]} />
-          <meshStandardMaterial color="#4e342e" metalness={0.55} />
+        <mesh position={[1.15, 0.95, -1.15]}>
+          <boxGeometry args={[0.12, 0.55, 2.7]} />
+          <meshStandardMaterial color="#3e2723" metalness={0.5} />
         </mesh>
-        {/* rear gun deck */}
-        <mesh position={[0, 0.72, -1.55]} castShadow>
-          <boxGeometry args={[2.55, 0.28, 1.9]} />
-          <meshStandardMaterial color="#1a1410" metalness={0.5} roughness={0.6} />
+        <mesh position={[0, 0.95, -2.5]}>
+          <boxGeometry args={[2.4, 0.5, 0.12]} />
+          <meshStandardMaterial color="#3e2723" metalness={0.5} />
         </mesh>
-        <mesh position={[0, 0.95, -1.55]} rotation={[-Math.PI / 2, 0, 0]}>
-          <ringGeometry args={[0.75, 1.15, 24]} />
-          <meshStandardMaterial color="#5d4037" metalness={0.7} roughness={0.35} side={THREE.DoubleSide} />
+        {/* cab bulkhead between cab and bed */}
+        <mesh position={[0, 1.05, 0.35]}>
+          <boxGeometry args={[2.2, 0.85, 0.14]} />
+          <meshStandardMaterial color="#241c16" metalness={0.45} />
         </mesh>
         {[
-          [-1.45, 0.12, 1.55],
-          [1.45, 0.12, 1.55],
-          [-1.45, 0.12, -1.65],
-          [1.45, 0.12, -1.65],
+          [-1.35, 0.12, 1.75],
+          [1.35, 0.12, 1.75],
+          [-1.35, 0.12, -1.85],
+          [1.35, 0.12, -1.85],
         ].map((p, i) => (
           <mesh key={i} position={p as [number, number, number]} rotation={[0, 0, Math.PI / 2]} castShadow>
-            <cylinderGeometry args={[0.62, 0.62, 0.48, 14]} />
-            <meshStandardMaterial color="#100c09" roughness={0.95} />
+            <cylinderGeometry args={[0.58, 0.58, 0.45, 14]} />
+            <meshStandardMaterial color="#0e0a08" roughness={0.95} />
           </mesh>
         ))}
-        <mesh position={[0, 0.58, 2.45]}>
-          <sphereGeometry args={[0.32, 12, 12]} />
-          <meshStandardMaterial color={color} emissive={color} emissiveIntensity={2.8} />
+        <mesh position={[0, 0.55, 2.35]}>
+          <sphereGeometry args={[0.28, 12, 12]} />
+          <meshStandardMaterial color={color} emissive={color} emissiveIntensity={2.6} />
         </mesh>
-        <pointLight position={[0, 1.2, 2.2]} color={color} intensity={10} distance={14} />
+        <pointLight position={[0, 1.1, 2.1]} color={color} intensity={11} distance={15} />
 
-        {/* rotating cupola — sits where the gunner is */}
-        <group ref={gunMount} position={[0, 1.55, -2.05]}>
-          <mesh position={[0, -0.12, 0]}>
-            <cylinderGeometry args={[0.55, 0.62, 0.28, 16]} />
+        {/* bed ring + turret — high enough to clear the low cab */}
+        <mesh position={[0, 0.78, -2.35]} rotation={[-Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[0.7, 1.05, 24]} />
+          <meshStandardMaterial color="#5d4037" metalness={0.7} roughness={0.35} side={THREE.DoubleSide} />
+        </mesh>
+        <group ref={gunMount} position={[0, 1.85, -2.35]}>
+          <mesh position={[0, -0.2, 0]}>
+            <cylinderGeometry args={[0.48, 0.55, 0.32, 16]} />
             <meshStandardMaterial color="#3e2723" metalness={0.6} roughness={0.4} />
           </mesh>
-          {/* seat pad behind the gun */}
-          <mesh position={[0, -0.35, -0.55]}>
-            <boxGeometry args={[0.7, 0.18, 0.55]} />
+          <mesh position={[0, -0.55, -0.35]}>
+            <boxGeometry args={[0.55, 0.14, 0.45]} />
             <meshStandardMaterial color="#1b1511" roughness={0.85} />
           </mesh>
-          <mesh position={[0, 0.05, -0.72]}>
-            <boxGeometry args={[0.65, 0.55, 0.12]} />
-            <meshStandardMaterial color="#2c2118" roughness={0.7} />
-          </mesh>
           <group ref={gunPitchMount}>
-            {/* armored gun shield — fills lower FOV for the gunner */}
-            <mesh position={[0, 0.15, 0.35]}>
-              <boxGeometry args={[1.15, 0.72, 0.1]} />
+            <mesh position={[0, 0.12, 0.28]}>
+              <boxGeometry args={[0.95, 0.42, 0.08]} />
               <meshStandardMaterial color="#4e342e" metalness={0.55} roughness={0.45} />
             </mesh>
-            <mesh position={[0, 0.42, 0.42]}>
-              <boxGeometry args={[0.85, 0.18, 0.08]} />
-              <meshStandardMaterial color="#6d4c41" metalness={0.5} />
-            </mesh>
-            {/* receiver + barrel along local +Z (vehicle forward when gunYaw=0) */}
-            <mesh position={[0, 0.08, 0.55]}>
-              <boxGeometry args={[0.38, 0.32, 0.7]} />
+            <mesh position={[0, 0.08, 0.5]}>
+              <boxGeometry args={[0.32, 0.26, 0.55]} />
               <meshStandardMaterial color="#efebe9" metalness={0.8} roughness={0.25} />
             </mesh>
-            <mesh position={[0, 0.06, 1.45]} rotation={[Math.PI / 2, 0, 0]}>
-              <cylinderGeometry args={[0.09, 0.12, 1.85, 10]} />
+            <mesh position={[0, 0.06, 1.35]} rotation={[Math.PI / 2, 0, 0]}>
+              <cylinderGeometry args={[0.08, 0.11, 1.7, 10]} />
               <meshStandardMaterial color="#d7ccc8" metalness={0.85} roughness={0.2} />
             </mesh>
-            <mesh position={[0, 0.06, 2.35]} rotation={[Math.PI / 2, 0, 0]}>
-              <cylinderGeometry args={[0.14, 0.11, 0.22, 8]} />
-              <meshStandardMaterial color="#ffab40" emissive="#ff6d00" emissiveIntensity={0.8} metalness={0.6} />
+            <mesh position={[0, 0.06, 2.2]} rotation={[Math.PI / 2, 0, 0]}>
+              <cylinderGeometry args={[0.13, 0.1, 0.2, 8]} />
+              <meshStandardMaterial color="#ffab40" emissive="#ff6d00" emissiveIntensity={0.9} metalness={0.6} />
             </mesh>
-            {/* twin grips */}
-            <mesh position={[-0.38, -0.05, 0.15]} rotation={[0.4, 0, 0.2]}>
-              <cylinderGeometry args={[0.05, 0.05, 0.45, 6]} />
+            <mesh position={[-0.32, -0.08, 0.12]} rotation={[0.4, 0, 0.2]}>
+              <cylinderGeometry args={[0.045, 0.045, 0.4, 6]} />
               <meshStandardMaterial color="#3e2723" />
             </mesh>
-            <mesh position={[0.38, -0.05, 0.15]} rotation={[0.4, 0, -0.2]}>
-              <cylinderGeometry args={[0.05, 0.05, 0.45, 6]} />
+            <mesh position={[0.32, -0.08, 0.12]} rotation={[0.4, 0, -0.2]}>
+              <cylinderGeometry args={[0.045, 0.045, 0.4, 6]} />
               <meshStandardMaterial color="#3e2723" />
             </mesh>
-            <pointLight position={[0, 0.2, 1.1]} color="#ffab40" intensity={4} distance={6} />
+            <pointLight position={[0, 0.15, 1.0]} color="#ffab40" intensity={3.5} distance={7} />
           </group>
         </group>
       </group>
@@ -1631,7 +1688,7 @@ function buildTerrain() {
               <div className="sky-escort-dead-vignette" />
               <p className="sky-escort-dead-kicker">Hull zero</p>
               <h2 className="sky-escort-dead-title">YOU&apos;RE DEAD</h2>
-              <p className="sky-escort-dead-sub">Buggy cooked — dive ship got you</p>
+              <p className="sky-escort-dead-sub">Truck cooked — dive ship got you</p>
               <p className="sky-escort-dead-hint">Space / R / Enter to retry</p>
             </div>
           )}
@@ -1655,8 +1712,8 @@ function buildTerrain() {
                 </p>
                 <p className="sky-escort-hint">
                   {seat === "driver"
-                    ? "Finale run — WASD drive the buggy across the plain; meteors punch holes in the ground"
-                    : "Rear turret seat — click to lock aim, hold fire on dive-bombers"}
+                    ? "WASD the pickup across terraced ash plains — meteors punch craters, follow the beacon"
+                    : "Bed turret — mouse aim over the open bed, hold fire on dive-bombers for points"}
                 </p>
                 <div className="sky-escort-actions">
                   <button type="button" className={seat === "driver" ? "on" : ""} onClick={() => pickSeat("driver")}>
@@ -1693,14 +1750,14 @@ function buildTerrain() {
             {phase === "run" && (
               <>
                 <p>
-                  {seat === "driver" ? "DRIVER" : "GUNNER"} · hull {"♥".repeat(hull)}
-                  {"♡".repeat(Math.max(0, level.hull - hull))} · {hudDist}m to gate
+                  {seat === "driver" ? "DRIVER" : "GUNNER"} · {score} pts · hull {"♥".repeat(hull)}
+                  {"♡".repeat(Math.max(0, level.hull - hull))} · {hudDist}m
                 </p>
                 {clearBanner ? <p className="sky-escort-alert">{clearBanner}</p> : failCue ? <p className="sky-escort-alert">METEOR IMPACT</p> : null}
                 <p className="sky-escort-hint">
                   {seat === "driver"
-                    ? `WASD trek · Shift boost (${loadoutHud.boostCharges}/${loadoutHud.boostMax}) · follow the beacon`
-                    : "Mouse aim · click / Space fire · seated on the rear cupola"}
+                    ? `WASD · Shift boost (${loadoutHud.boostCharges}/${loadoutHud.boostMax}) · ramps & beacon`
+                    : "Mouse aim · click / Space fire · +100 per dive ship"}
                 </p>
               </>
             )}
