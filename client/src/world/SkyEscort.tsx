@@ -1323,31 +1323,30 @@ function buildTerrain() {
     const persp = camera as THREE.PerspectiveCamera;
     const gunnerLive = seatRef.current === "gunner" && phaseRef.current !== "ready";
     if (gunnerLive) {
-      // Seated in the rear cupola, looking down the iron.
+      // Elevated cupola eyes — clear the cabin roof so the gunner can actually see.
       const t = turretWorld();
       const aimYaw = yaw.current + gunYaw.current;
       const cy = Math.cos(aimYaw);
       const sy = Math.sin(aimYaw);
       const cp = Math.cos(gunPitch.current);
       const sp = Math.sin(gunPitch.current);
-      const eyeBack = 0.48;
-      const eyeUp = 0.28;
+      const eyeBack = 0.35;
+      const eyeUp = 1.05;
       camera.position.set(
         t.x - sy * eyeBack + ox * 0.14,
         t.y + eyeUp + oy * 0.14,
         t.z - cy * eyeBack,
       );
-      camera.lookAt(t.x + sy * cp * 40, t.y + sp * 40 + 0.05, t.z + cy * cp * 40);
+      camera.lookAt(t.x + sy * cp * 40, t.y + eyeUp + sp * 40, t.z + cy * cp * 40);
       if (persp.isPerspectiveCamera) {
-        persp.fov = 52;
+        persp.fov = 58;
         persp.updateProjectionMatrix();
       }
-      // FP gun rides the camera so shield + barrel always read in the seat.
+      // FP gun rides the camera — kept low so it frames the bottom, doesn't block sky.
       if (fpGun.current) {
         if (fpGun.current.parent !== camera) camera.add(fpGun.current);
         fpGun.current.visible = true;
-        // Lower + farther so cheeks frame the world instead of walling it off.
-        fpGun.current.position.set(0, -0.38, -0.72);
+        fpGun.current.position.set(0, -0.48, -0.78);
         fpGun.current.rotation.set(0, 0, 0);
       }
     } else {
