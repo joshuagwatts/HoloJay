@@ -113,8 +113,8 @@ function baseGround(x: number, z: number, startZ: number, endZ: number): number 
   for (let i = 1; i <= rampCount; i++) {
     const peak = i / (rampCount + 1);
     const d = along - peak;
-    h += Math.exp(-(d * d) * 210) * 3.6;
-    h += Math.exp(-(d * d) * 70) * 1.25;
+    h += Math.exp(-(d * d) * 210) * 4.4;
+    h += Math.exp(-(d * d) * 70) * 1.6;
   }
   const edge = Math.max(0, Math.abs(x) - 20);
   h += edge * 0.07;
@@ -1828,8 +1828,8 @@ export function SkyEscort({ color }: { color: string }) {
                 </p>
                 <p className="sky-escort-hint">
                   {seat === "driver"
-                    ? "WASD the pickup — dodge meteor craters, Shift-boost, follow the beacon"
-                    : "Bed turret — snap aim, shred dive-bombers for streaks"}
+                    ? "Drive the ash ramps, scoop upgrade pads, Shift-boost to the gate"
+                    : "Bed turret — shred dive-bombers, grab turret/radar pads for power"}
                 </p>
                 <div className="sky-escort-actions">
                   <button type="button" className={seat === "driver" ? "on" : ""} onClick={() => pickSeat("driver")}>
