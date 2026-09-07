@@ -3,7 +3,13 @@ import { shuffleIds } from "./path.ts";
 import { MAX_FAVORITES, PORTAL_COUNT, type Favorite, type PortalAssignment } from "./types.ts";
 
 export function makeAssignments(seed: number, favoriteIds: string[]): PortalAssignment[] {
-  const pool = GAMES.map((g) => g.id).filter((id) => !favoriteIds.includes(id));
+  const all = GAMES.map((g) => g.id);
+  const nonFav = all.filter((id) => !favoriteIds.includes(id));
+  // When the whole catalog fits on the path, always show every game.
+  // Pins live in the plaza as stable shortcuts — they must not shrink the path
+  // down to 1–2 cabinets while the catalog is still tiny.
+  // If the catalog later exceeds PORTAL_COUNT, prefer non-pinned games for variety.
+  const pool = all.length <= PORTAL_COUNT ? all : nonFav.length > 0 ? nonFav : all;
   const count = Math.min(PORTAL_COUNT, pool.length);
   return shuffleIds(seed, pool)
     .slice(0, count)
