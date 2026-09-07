@@ -96,69 +96,59 @@ function levelIndexFromId(id: string | undefined): number {
   return 0;
 }
 
-function terrainNoise(x: number, z: number): number {
-  const s = Math.sin(x * 0.21 + z * 0.17) * 43758.5453;
-  return s - Math.floor(s);
-}
+/** Smooth ash plain with deliberate drive-up ramps — no blocky terrace shelves. */
+type Crater = { id: number; x: number; z: number; r: number; depth: number };
 
-/** Ten elevation bands with blended slopes between shelves. */
-const TERRACE_COUNT = 10;
-const TERRACE_STEP = 0.55;
-
-/** Continuous terrace field 0..COUNT (floors = shelves, fractions = slopes). */
-function terraceFloat(x: number, z: number, startZ: number, endZ: number): number {
+function baseGround(x: number, z: number, startZ: number, endZ: number): number {
   const span = Math.max(1, startZ - endZ);
-  const along = (startZ - z) / span; // 0 start → 1 gate
-  const wave =
-    Math.sin(z * 0.024) * 0.38 +
-    Math.sin(x * 0.018 + z * 0.007) * 0.32 +
-    Math.sin((x * 0.45 + z) * 0.015) * 0.22 +
-    Math.sin(z * 0.011 - x * 0.009) * 0.12;
-  const raw = Math.min(0.999, Math.max(0, 0.22 + along * 0.28 + wave * 0.55));
-  return raw * (TERRACE_COUNT - 1);
-}
-
-/** Softstep blend so shelves stay flat and transitions become angled slopes. */
-function terraceBlended(x: number, z: number, startZ: number, endZ: number): number {
-  const f = terraceFloat(x, z, startZ, endZ);
-  const base = Math.floor(f);
-  const frac = f - base;
-  // Flat shelf for ~55% of band; slope blend in the outer edges
-  let blend: number;
-  if (frac < 0.22) blend = 0;
-  else if (frac > 0.78) blend = 1;
-  else {
-    const t = (frac - 0.22) / 0.56;
-    blend = t * t * (3 - 2 * t);
+  const along = Math.min(1, Math.max(0, (startZ - z) / span));
+  let h =
+    0.4 +
+    along * 2.4 +
+    Math.sin(z * 0.026) * 0.55 +
+    Math.sin(x * 0.032 + z * 0.014) * 0.4 +
+    Math.sin((x * 0.7 + z) * 0.011) * 0.22;
+  // Clear ramp ridges along the route (drive up, crest, drop).
+  const rampCount = 5;
+  for (let i = 1; i <= rampCount; i++) {
+    const peak = i / (rampCount + 1);
+    const d = along - peak;
+    h += Math.exp(-(d * d) * 210) * 3.6;
+    h += Math.exp(-(d * d) * 70) * 1.25;
   }
-  return base + blend;
+  const edge = Math.max(0, Math.abs(x) - 20);
+  h += edge * 0.07;
+  if (z < endZ + 16 && z > endZ - 10 && Math.abs(x) < 11) h = 1.05 + along * 0.15;
+  if (z > startZ - 12) h = Math.min(h, 1.05);
+  return h;
 }
 
-function terraceTop(elev: number): number {
-  // Slab thickness base 0.5 + elev*step → top face Y
-  return 0.5 + elev * TERRACE_STEP;
+function craterCarve(x: number, z: number, craters: Crater[]): number {
+  let cut = 0;
+  for (const c of craters) {
+    const dist = Math.hypot(x - c.x, z - c.z);
+    if (dist >= c.r) continue;
+    const t = 1 - dist / c.r;
+    cut += c.depth * t * t * (0.65 + 0.35 * t);
+  }
+  return cut;
 }
 
-function sampleGroundH(x: number, z: number, startZ: number, endZ: number): number {
-  return terraceBlended(x, z, startZ, endZ) * TERRACE_STEP;
+function groundY(x: number, z: number, startZ: number, endZ: number, craters: Crater[]): number {
+  return Math.max(-2.8, baseGround(x, z, startZ, endZ) - craterCarve(x, z, craters));
+}
+
+/** World Z of ramp crest centers for chevron markers. */
+function rampCrestZs(startZ: number, endZ: number): number[] {
+  const span = Math.max(1, startZ - endZ);
+  const out: number[] = [];
+  for (let i = 1; i <= 5; i++) out.push(startZ - (i / 6) * span);
+  return out;
 }
 
 type Role = "driver" | "gunner";
 type Phase = "ready" | "run" | "intro" | "won" | "dead";
 
-type Tile = {
-  id: number;
-  x: number;
-  z: number;
-  drop: number;
-  gone: boolean;
-  h: number;
-  shade: number;
-  pitch: number;
-  roll: number;
-  /** Finish pad — never craters; solid ground under the gate. */
-  safe?: boolean;
-};
 type Meteor = { id: number; x: number; y: number; z: number; vx: number; vy: number; vz: number };
 type Alien = { id: number; x: number; y: number; z: number; hp: number };
 type Bullet = { id: number; x: number; y: number; z: number; dx: number; dy: number; dz: number };
@@ -197,6 +187,13 @@ const UPGRADE_LABEL: Record<UpgradeId, string> = {
   turret: "Turret feed",
 };
 
+const UPGRADE_COLOR: Record<UpgradeId, string> = {
+  boost: "#ff7043",
+  armor: "#69f0ae",
+  radar: "#40c4ff",
+  turret: "#ffd54f",
+};
+
 type Snap = {
   type: "snap";
   phase: Phase;
@@ -206,7 +203,7 @@ type Snap = {
   z: number;
   y: number;
   yaw: number;
-  tiles: Tile[];
+  craters: Crater[];
   meteors: Meteor[];
   aliens: Alien[];
   blasts: Blast[];
@@ -329,11 +326,12 @@ export function SkyEscort({ color }: { color: string }) {
   const [hitFlash, setHitFlash] = useState(false);
   const fovKick = useRef(0);
 
-  const tiles = useRef<Tile[]>([]);
+  const craters = useRef<Crater[]>([]);
   const meteors = useRef<Meteor[]>([]);
   const aliens = useRef<Alien[]>([]);
   const bullets = useRef<Bullet[]>([]);
   const blasts = useRef<Blast[]>([]);
+  const groundDirty = useRef(true);
 
   const buggy = useRef<THREE.Group>(null);
   const gunMount = useRef<THREE.Group>(null);
@@ -349,7 +347,8 @@ export function SkyEscort({ color }: { color: string }) {
       obj.layers.set(1);
     });
   };
-  const tileGroup = useRef<THREE.Group>(null);
+  const groundMesh = useRef<THREE.Mesh>(null);
+  const rampGroup = useRef<THREE.Group>(null);
   const meteorGroup = useRef<THREE.Group>(null);
   const alienGroup = useRef<THREE.Group>(null);
   const bulletGroup = useRef<THREE.Group>(null);
@@ -357,99 +356,29 @@ export function SkyEscort({ color }: { color: string }) {
 
   const mats = useMemo(
     () => ({
-      dirt: [
-        new THREE.MeshStandardMaterial({
-          color: "#2a1e14",
-          emissive: "#120c08",
-          emissiveIntensity: 0.1,
-          roughness: 1,
-          flatShading: true,
-        }),
-        new THREE.MeshStandardMaterial({
-          color: "#3a2a1c",
-          emissive: "#1a1008",
-          emissiveIntensity: 0.12,
-          roughness: 0.98,
-          flatShading: true,
-        }),
-        new THREE.MeshStandardMaterial({
-          color: "#463522",
-          emissive: "#1c140a",
-          emissiveIntensity: 0.14,
-          roughness: 0.96,
-          flatShading: true,
-        }),
-        new THREE.MeshStandardMaterial({
-          color: "#4a3824",
-          emissive: "#1e160c",
-          emissiveIntensity: 0.12,
-          roughness: 0.95,
-          flatShading: true,
-        }),
-        new THREE.MeshStandardMaterial({
-          color: "#52402a",
-          emissive: "#20180e",
-          emissiveIntensity: 0.1,
-          roughness: 0.94,
-          flatShading: true,
-        }),
-        new THREE.MeshStandardMaterial({
-          color: "#5a4830",
-          emissive: "#221a10",
-          emissiveIntensity: 0.08,
-          roughness: 0.93,
-          flatShading: true,
-        }),
-      ,
-        new THREE.MeshStandardMaterial({
-          color: "#624e34",
-          emissive: "#241c12",
-          emissiveIntensity: 0.08,
-          roughness: 0.92,
-          flatShading: true,
-        }),
-        new THREE.MeshStandardMaterial({
-          color: "#6a563c",
-          emissive: "#261e14",
-          emissiveIntensity: 0.07,
-          roughness: 0.91,
-          flatShading: true,
-        }),
-        new THREE.MeshStandardMaterial({
-          color: "#725e44",
-          emissive: "#282016",
-          emissiveIntensity: 0.06,
-          roughness: 0.9,
-          flatShading: true,
-        }),
-        new THREE.MeshStandardMaterial({
-          color: "#7a664c",
-          emissive: "#2a2218",
-          emissiveIntensity: 0.05,
-          roughness: 0.89,
-          flatShading: true,
-        }),
-],
-      rock: new THREE.MeshStandardMaterial({
-        color: "#4a4036",
-        emissive: "#1a1612",
-        emissiveIntensity: 0.08,
+      ground: new THREE.MeshStandardMaterial({
+        color: "#5a4634",
+        emissive: "#2a1c12",
+        emissiveIntensity: 0.18,
         roughness: 0.92,
-        flatShading: true,
+        metalness: 0.08,
+        vertexColors: true,
+      }),
+      ramp: new THREE.MeshStandardMaterial({
+        color: "#ffab40",
+        emissive: "#ff6d00",
+        emissiveIntensity: 1.35,
+        roughness: 0.45,
+        metalness: 0.35,
+        transparent: true,
+        opacity: 0.85,
       }),
       finish: new THREE.MeshStandardMaterial({
         color: "#c9a227",
         emissive: "#ffd54f",
-        emissiveIntensity: 0.75,
-        roughness: 0.7,
-        flatShading: true,
-      }),
-      dirtHot: new THREE.MeshStandardMaterial({
-        color: "#6a3010",
-        emissive: color,
-        emissiveIntensity: 0.85,
-        roughness: 0.7,
-        flatShading: true,
+        emissiveIntensity: 0.9,
+        roughness: 0.4,
+        metalness: 0.35,
       }),
       meteor: new THREE.MeshStandardMaterial({ color: "#5c4030", emissive: "#ff6a00", emissiveIntensity: 1.3 }),
       alien: new THREE.MeshStandardMaterial({ color: "#1b5e20", emissive: "#69f0ae", emissiveIntensity: 1.4 }),
@@ -475,7 +404,7 @@ export function SkyEscort({ color }: { color: string }) {
       z: z.current,
       y: y.current,
       yaw: yaw.current,
-      tiles: tiles.current.map((t) => ({ ...t })),
+      craters: craters.current.map((c) => ({ ...c })),
       meteors: meteors.current.map((m) => ({ ...m })),
       aliens: aliens.current.map((a) => ({ ...a })),
       blasts: blasts.current.map((b) => ({ ...b })),
@@ -555,25 +484,107 @@ export function SkyEscort({ color }: { color: string }) {
   }
 
   
+  function gy(wx: number, wz: number) {
+    const L = activeLevel();
+    return groundY(wx, wz, L.startZ, L.endZ, craters.current);
+  }
+
+  function rebuildGroundSurface() {
+    const mesh = groundMesh.current;
+    if (!mesh) return;
+    const L = activeLevel();
+    const width = L.halfW * 2.6;
+    const length = L.startZ - L.endZ + 48;
+    const midZ = (L.startZ + L.endZ) * 0.5;
+    const segX = 84;
+    const segZ = Math.min(180, Math.max(90, Math.floor(length / 2.2)));
+    const geo = new THREE.PlaneGeometry(width, length, segX, segZ);
+    geo.rotateX(-Math.PI / 2);
+    const pos = geo.attributes.position as THREE.BufferAttribute;
+    const colors = new Float32Array(pos.count * 3);
+    for (let i = 0; i < pos.count; i++) {
+      const wx = pos.getX(i);
+      const wz = midZ + pos.getZ(i);
+      const h = groundY(wx, wz, L.startZ, L.endZ, craters.current);
+      pos.setY(i, h);
+      // Warm ash → cooler crest on ramps
+      const along = Math.min(1, Math.max(0, (L.startZ - wz) / Math.max(1, L.startZ - L.endZ)));
+      const rampGlow = Math.max(0, h - (0.4 + along * 2.4));
+      colors[i * 3] = 0.32 + rampGlow * 0.22 + along * 0.08;
+      colors[i * 3 + 1] = 0.22 + rampGlow * 0.12;
+      colors[i * 3 + 2] = 0.14 + rampGlow * 0.04;
+      if (craterCarve(wx, wz, craters.current) > 0.4) {
+        colors[i * 3] = 0.12;
+        colors[i * 3 + 1] = 0.07;
+        colors[i * 3 + 2] = 0.05;
+      }
+    }
+    geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    geo.computeVertexNormals();
+    const prev = mesh.geometry;
+    mesh.geometry = geo;
+    mesh.position.set(0, 0, midZ);
+    prev.dispose();
+    groundDirty.current = false;
+
+    // Lit ramp chevrons so the rises are obvious
+    const rg = rampGroup.current;
+    if (rg) {
+      while (rg.children.length) {
+        const c = rg.children[0]!;
+        rg.remove(c);
+        if (c instanceof THREE.Mesh) {
+          c.geometry.dispose();
+          (c.material as THREE.Material).dispose?.();
+        }
+      }
+      for (const zz of rampCrestZs(L.startZ, L.endZ)) {
+        const hy = groundY(0, zz, L.startZ, L.endZ, craters.current);
+        const ahead = groundY(0, zz - 4, L.startZ, L.endZ, craters.current);
+        const behind = groundY(0, zz + 4, L.startZ, L.endZ, craters.current);
+        const pitch = Math.atan2(behind - ahead, 8);
+        for (const side of [-1, 1]) {
+          const marker = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.8, 3), mats.ramp);
+          marker.position.set(side * 6.5, hy + 0.9, zz);
+          marker.rotation.set(pitch + 0.2, 0, 0);
+          rg.add(marker);
+        }
+        const strip = new THREE.Mesh(new THREE.BoxGeometry(14, 0.08, 3.2), mats.ramp);
+        strip.position.set(0, hy + 0.05, zz);
+        strip.rotation.x = pitch;
+        rg.add(strip);
+      }
+    }
+  }
+
   function spawnPickups(L: LevelDef) {
     const list: Pickup[] = [];
-    // Sparse boost pads along the route — infrastructure for richer upgrades later.
-    const pads = 2 + Math.min(3, Math.floor(levelIdxRef.current / 2));
+    const kinds: UpgradeId[] = ["boost", "armor", "radar", "turret", "boost"];
+    // Always seed a full upgrade set on the route — visible and frequent.
+    const pads = 5 + Math.min(3, Math.floor(levelIdxRef.current / 2));
     for (let i = 0; i < pads; i++) {
-      const tAlong = 0.25 + (i / Math.max(1, pads)) * 0.55;
+      const tAlong = 0.14 + (i / Math.max(1, pads - 1)) * 0.72;
       const zz = L.startZ + (L.endZ - L.startZ) * tAlong;
-      const xx = ((i % 2 === 0 ? 1 : -1) * (8 + (i % 3) * 5));
-      const h = sampleGroundH(xx, zz, L.startZ, L.endZ);
+      const xx = (i % 2 === 0 ? 1 : -1) * (5 + (i % 3) * 3.5);
+      const kind = kinds[i % kinds.length]!;
       list.push({
         id: nextId.current++,
-        kind: i === 0 && levelIdxRef.current > 0 ? (["boost", "armor", "radar", "turret"] as UpgradeId[])[levelIdxRef.current % 4] : "boost",
+        kind,
         x: xx,
-        y: terraceTop(h / TERRACE_STEP) + 0.6,
+        y: groundY(xx, zz, L.startZ, L.endZ, craters.current) + 1.1,
         z: zz,
         taken: false,
       });
     }
     pickups.current = list;
+  }
+
+  function buildTerrain() {
+    craters.current = [];
+    groundDirty.current = true;
+    spawnPickups(activeLevel());
+    // Mesh may not be mounted on first ready frame — rebuildGroundSurface runs in useFrame too.
+    rebuildGroundSurface();
   }
 
   function applyPickup(kind: UpgradeId) {
@@ -588,11 +599,13 @@ export function SkyEscort({ color }: { color: string }) {
     } else if (kind === "radar") {
       L.radar = true;
     } else if (kind === "turret") {
-      L.turretRate = Math.min(1.75, L.turretRate + 0.25);
+      L.turretRate = Math.min(1.85, L.turretRate + 0.3);
     }
     setLoadoutHud({ ...L });
-    setClearBanner(UPGRADE_LABEL[kind]);
-    clearBannerT.current = 1.6;
+    setClearBanner(`UPGRADE · ${UPGRADE_LABEL[kind].toUpperCase()}`);
+    clearBannerT.current = 1.8;
+    playSfx("gate");
+    shakeRef.current = Math.max(shakeRef.current, 0.4);
   }
 
   function tryBoost() {
@@ -607,37 +620,6 @@ export function SkyEscort({ color }: { color: string }) {
     setClearBanner("BOOST");
     clearBannerT.current = 0.7;
     playSfx("boost");
-  }
-
-function buildTerrain() {
-    const L = activeLevel();
-    const list: Tile[] = [];
-    let id = 1;
-    const x0 = -Math.ceil(L.halfW / L.tile) * L.tile;
-    const x1 = Math.ceil(L.halfW / L.tile) * L.tile;
-    const z0 = Math.ceil((L.startZ + L.tile) / L.tile) * L.tile;
-    const z1 = Math.floor((L.endZ - L.tile * 4) / L.tile) * L.tile;
-    for (let zz = z0; zz >= z1; zz -= L.tile) {
-      for (let xx = x0; xx <= x1; xx += L.tile) {
-        const finish =
-          zz <= L.endZ + L.tile * 1.5 && zz >= L.endZ - L.tile * 2.5 && Math.abs(xx) <= L.tile * 3;
-        const nearStart = zz >= L.startZ - L.tile * 2;
-        let elev = terraceBlended(xx, zz, L.startZ, L.endZ);
-        if (finish || nearStart) elev = Math.min(elev, 1.05);
-        const h = elev * TERRACE_STEP;
-        // Slope from neighbor heights (angled ramps between shelves).
-        const hn = sampleGroundH(xx, zz - L.tile, L.startZ, L.endZ);
-        const hs = sampleGroundH(xx, zz + L.tile, L.startZ, L.endZ);
-        const he = sampleGroundH(xx + L.tile, zz, L.startZ, L.endZ);
-        const hw = sampleGroundH(xx - L.tile, zz, L.startZ, L.endZ);
-        const pitch = finish || nearStart ? 0 : Math.atan2(hs - hn, L.tile * 2);
-        const roll = finish || nearStart ? 0 : Math.atan2(hw - he, L.tile * 2);
-        const shade = finish ? 0 : Math.min(TERRACE_COUNT - 1, Math.round(elev));
-        list.push({ id: id++, x: xx, z: zz, drop: 0, gone: false, h, shade, pitch, roll, safe: finish });
-      }
-    }
-    tiles.current = list;
-    spawnPickups(L);
   }
 
   function snapSeatCam(role: Role) {
@@ -733,19 +715,21 @@ function buildTerrain() {
     }
     x.current = 0;
     z.current = L.startZ;
-    y.current = terraceTop(1);
+    y.current = gy(0, L.startZ) + 0.85;
     yaw.current = Math.PI;
     speed.current = 0;
     falling.current = false;
     invuln.current = 0;
-    hullRef.current = L.hull;
-    setHull(L.hull);
-    // Fresh attempt from ready / death resets score; level clears keep it.
+    hullRef.current = L.hull + (phaseRef.current === "intro" ? loadout.current.armorBonus : 0);
+    setHull(hullRef.current);
+    // Fresh attempt from ready / death resets score + loadout; level clears keep them.
     if (nextLevelIdx === 0 || phaseRef.current === "dead" || phaseRef.current === "ready") {
       if (phaseRef.current !== "intro") {
         scoreRef.current = 0;
         setScore(0);
         killStreak.current = 0;
+        loadout.current = DEFAULT_LOADOUT();
+        setLoadoutHud({ ...loadout.current });
       }
     }
     keys.current = { throttle: 0, steer: 0 };
@@ -971,12 +955,8 @@ function buildTerrain() {
         z.current = data.z;
         y.current = data.y;
         yaw.current = data.yaw;
-        tiles.current = data.tiles.map((t) => ({
-          ...t,
-          h: t.h ?? 0.35,
-          shade: t.shade ?? 0,
-          safe: t.safe ?? false,
-        }));
+        craters.current = (data.craters ?? []).map((c) => ({ ...c }));
+        groundDirty.current = true;
         meteors.current = data.meteors;
         aliens.current = data.aliens;
         blasts.current = data.blasts;
@@ -1071,53 +1051,51 @@ function buildTerrain() {
         }
       }
 
-      // Terrain only blows when meteors land — no random collapse.
-      for (const t of tiles.current) {
-        if (t.gone) continue;
-        if (t.drop > 0) {
-          t.drop += clamped * (2.1 + progress * 2.4);
-          if (t.drop > 9) t.gone = true;
-        }
-      }
-
-      const under = tiles.current.find(
-        (t) =>
-          !t.gone &&
-          Math.abs(t.x - x.current) < level.tile * 0.55 &&
-          Math.abs(t.z - z.current) < level.tile * 0.55,
-      );
-      if (!under || under.drop > 1.35) falling.current = true;
+      // Continuous ground follow + crater pits (no block tiles).
+      const surface = gy(x.current, z.current);
+      const pit = craterCarve(x.current, z.current, craters.current);
+      if (!falling.current && pit > 2.1) falling.current = true;
       if (falling.current) {
-        y.current -= 14 * clamped;
-        if (y.current < -4) {
+        y.current -= 16 * clamped;
+        if (y.current < surface - 4 || y.current < -4) {
           falling.current = false;
           hurt(1);
-          const solid = tiles.current.find((t) => !t.gone && t.drop < 0.2 && Math.abs(t.z - z.current) < 16);
-          if (solid) {
-            x.current = solid.x;
-            z.current = solid.z;
-            y.current = terraceTop(Math.round((solid.h ?? 0) / TERRACE_STEP));
-          } else {
-            y.current = terraceTop(1);
+          // Pop back onto solid ground near the truck
+          let nx = x.current;
+          let nz = z.current;
+          for (let tries = 0; tries < 8; tries++) {
+            nx = x.current + (Math.random() - 0.5) * 14;
+            nz = z.current + (Math.random() - 0.5) * 10;
+            if (craterCarve(nx, nz, craters.current) < 0.6) break;
           }
+          x.current = nx;
+          z.current = nz;
+          y.current = gy(nx, nz) + 0.85;
         }
       } else {
-        const elev = under ? (under.h ?? 0) / TERRACE_STEP : 1;
-        const targetY = under ? terraceTop(elev) + Math.tan(under.pitch ?? 0) * 0.15 : terraceTop(1);
+        const ahead = gy(
+          x.current + Math.sin(yaw.current) * 3.2,
+          z.current + Math.cos(yaw.current) * 3.2,
+        );
+        const behind = gy(
+          x.current - Math.sin(yaw.current) * 2.4,
+          z.current - Math.cos(yaw.current) * 2.4,
+        );
+        const targetY = surface + 0.85;
         y.current = THREE.MathUtils.damp(y.current, targetY, 14, clamped);
-        if (under && buggy.current && !falling.current) {
-          buggy.current.rotation.x = THREE.MathUtils.damp(buggy.current.rotation.x, under.pitch ?? 0, 9, clamped);
+        if (buggy.current) {
+          const pitch = Math.atan2(behind - ahead, 5.6);
+          buggy.current.rotation.x = THREE.MathUtils.damp(buggy.current.rotation.x, pitch, 10, clamped);
         }
       }
 
-      
       // Pickup pads (boost / upgrade scaffolding)
       for (const pk of pickups.current) {
         if (pk.taken) continue;
-        if (Math.hypot(pk.x - x.current, pk.z - z.current) < 2.2) {
+        if (Math.hypot(pk.x - x.current, pk.z - z.current) < 3.4) {
           pk.taken = true;
           applyPickup(pk.kind);
-          addBlast(pk.x, pk.y, pk.z);
+          addBlast(pk.x, pk.y + 0.4, pk.z);
         }
       }
 
@@ -1152,12 +1130,15 @@ function buildTerrain() {
             setFailCue(true);
             playSfx("boom");
           }
-          // Crater: impact tile + neighbors
-          const craterR = level.tile * 1.05;
-          for (const t of tiles.current) {
-            if (t.gone || t.drop > 0 || t.safe) continue;
-            if (Math.hypot(t.x - m.x, t.z - m.z) < craterR) t.drop = 0.01;
-          }
+          craters.current.push({
+            id: nextId.current++,
+            x: m.x,
+            z: m.z,
+            r: 4.8 + Math.random() * 1.6,
+            depth: 2.4 + Math.random() * 1.2,
+          });
+          if (craters.current.length > 28) craters.current.shift();
+          groundDirty.current = true;
           m.y = -99;
         }
         if (Math.hypot(m.x - x.current, m.z - z.current) < 1.7 && m.y < 2.3 && m.y > 0) {
@@ -1242,7 +1223,6 @@ function buildTerrain() {
           fireCd.current = 0.11 / Math.max(0.85, loadout.current.turretRate);
           shakeRef.current = Math.max(shakeRef.current, 0.18);
           playSfx("fire");
-          addBlast(tip.x, tip.y, tip.z);
         }
       }
 
@@ -1328,7 +1308,7 @@ function buildTerrain() {
           z: z.current,
           y: y.current,
           yaw: yaw.current,
-          tiles: tiles.current.map((t) => ({ ...t })),
+          craters: craters.current.map((c) => ({ ...c })),
           meteors: meteors.current.map((m) => ({ ...m })),
           aliens: aliens.current.map((a) => ({ ...a })),
           blasts: blasts.current.map((b) => ({ ...b })),
@@ -1378,26 +1358,9 @@ function buildTerrain() {
       gunPitchMount.current.visible = !(seatRef.current === "gunner" && phaseRef.current === "run");
     }
 
-    syncGroup(
-      tileGroup.current,
-      tiles.current,
-      (t, mesh) => {
-        mesh.visible = !t.gone;
-        const elev = (t.h ?? 0) / TERRACE_STEP;
-        const elevRound = Math.min(TERRACE_COUNT - 1, Math.max(0, Math.round(elev)));
-        const thick = terraceTop(elev); // continuous height incl. slope blend
-        mesh.scale.set(level.tile * 1.01, Math.max(0.45, thick), level.tile * 1.01);
-        mesh.position.set(t.x, Math.max(0.45, thick) * 0.5 - t.drop, t.z);
-        // Angled slopes between terrace shelves
-        mesh.rotation.x = t.drop > 0 ? t.drop * 0.02 : (t.pitch ?? 0);
-        mesh.rotation.z = t.drop > 0 ? t.drop * 0.04 * Math.sign(t.x || 1) : (t.roll ?? 0);
-        if (t.drop > 0) mesh.material = mats.dirtHot;
-        else if (t.safe) mesh.material = mats.finish;
-        else if (elevRound >= TERRACE_COUNT - 2) mesh.material = mats.rock;
-        else mesh.material = mats.dirt[elevRound % mats.dirt.length]!;
-      },
-      () => new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mats.dirt[0]!),
-    );
+    if (groundDirty.current || (groundMesh.current && groundMesh.current.geometry.attributes.position.count < 10)) {
+      rebuildGroundSurface();
+    }
 
     syncGroup(
       meteorGroup.current,
@@ -1478,21 +1441,26 @@ function buildTerrain() {
       pickups.current.filter((pk) => !pk.taken),
       (pk, mesh) => {
         mesh.visible = true;
-        mesh.position.set(pk.x, pk.y + Math.sin(performance.now() * 0.004 + pk.id) * 0.15, pk.z);
-        mesh.rotation.y += clamped * 1.8;
+        const bob = Math.sin(performance.now() * 0.005 + pk.id) * 0.22;
+        mesh.position.set(pk.x, gy(pk.x, pk.z) + 1.15 + bob, pk.z);
+        mesh.rotation.y += clamped * 2.2;
+        const col = UPGRADE_COLOR[pk.kind];
+        const mat = mesh.material as THREE.MeshStandardMaterial;
+        mat.color.set(col);
+        mat.emissive.set(col);
+        mat.emissiveIntensity = 1.8 + Math.sin(performance.now() * 0.01 + pk.id) * 0.5;
+        mesh.scale.setScalar(1.15 + Math.sin(performance.now() * 0.008 + pk.id) * 0.08);
       },
-      () => {
-        const m = new THREE.Mesh(
-          new THREE.OctahedronGeometry(0.55),
-          new THREE.MeshStandardMaterial({ color: "#80d8ff", emissive: "#40c4ff", emissiveIntensity: 1.4 }),
-        );
-        return m;
-      },
+      () =>
+        new THREE.Mesh(
+          new THREE.OctahedronGeometry(0.85),
+          new THREE.MeshStandardMaterial({ color: "#ff7043", emissive: "#ff7043", emissiveIntensity: 1.8, metalness: 0.4, roughness: 0.25 }),
+        ),
     );
 
     // Gate beacon + heading chevron — always show where to drive
     if (gateBeacon.current) {
-      const gh = terraceTop(sampleGroundH(0, level.endZ, level.startZ, level.endZ) / TERRACE_STEP);
+      const gh = gy(0, level.endZ);
       gateBeacon.current.position.set(0, gh + 4.5 + Math.sin(performance.now() * 0.003) * 0.35, level.endZ);
       gateBeacon.current.visible = phaseRef.current === "run" || phaseRef.current === "intro";
     }
@@ -1607,19 +1575,19 @@ function buildTerrain() {
 
   return (
     <group>
-      <color attach="background" args={["#1a0e0a"]} />
-      <fog attach="fog" args={["#1a0e0a", 36, 140]} />
-      <ambientLight intensity={0.42} />
-      <hemisphereLight args={["#ffcc80", "#2a1810", 0.55]} />
+      <color attach="background" args={["#140c08"]} />
+      <fog attach="fog" args={["#1c100a", 28, 125]} />
+      <ambientLight intensity={0.5} />
+      <hemisphereLight args={["#ffcc80", "#1a1008", 0.7]} />
       <directionalLight
-        position={[14, 28, 8]}
-        intensity={1.15}
+        position={[18, 32, 10]}
+        intensity={1.35}
         color="#ffe0b2"
         castShadow
         shadow-mapSize-width={1024}
         shadow-mapSize-height={1024}
       />
-      <pointLight position={[x.current, 8, z.current]} color="#ff6a00" intensity={22} distance={60} />
+      <pointLight position={[x.current, 10, z.current]} color="#ff6a00" intensity={28} distance={70} />
 
       {Array.from({ length: 30 }, (_, i) => (
         <mesh key={i} position={[(i % 8) * 7 - 24, 1.2 + (i % 5), -i * 3.4]}>
@@ -1651,7 +1619,10 @@ function buildTerrain() {
       </mesh>
       <pointLight position={[0, 5, level.endZ]} color="#ffe082" intensity={18} distance={28} />
 
-      <group ref={tileGroup} />
+      <mesh ref={groundMesh} material={mats.ground} receiveShadow>
+        <planeGeometry args={[10, 10, 1, 1]} />
+      </mesh>
+      <group ref={rampGroup} />
       <group ref={meteorGroup} />
       <group ref={alienGroup} />
       <group ref={bulletGroup} />
@@ -1894,15 +1865,25 @@ function buildTerrain() {
             )}
             {phase === "run" && (
               <>
+                <div className="sky-escort-loadout" aria-label="Loadout">
+                  <span className={loadoutHud.boostCharges > 0 ? "on" : ""}>
+                    BOOST {loadoutHud.boostCharges}/{loadoutHud.boostMax}
+                  </span>
+                  <span className={loadoutHud.armorBonus > 0 ? "on" : ""}>ARMOR {loadoutHud.armorBonus}</span>
+                  <span className={loadoutHud.radar ? "on" : ""}>RADAR</span>
+                  <span className={loadoutHud.turretRate > 1 ? "on" : ""}>
+                    TURRET ×{loadoutHud.turretRate.toFixed(2)}
+                  </span>
+                </div>
                 <p>
                   {seat === "driver" ? "DRIVER" : "GUNNER"} · {score} pts · hull {"♥".repeat(hull)}
-                  {"♡".repeat(Math.max(0, level.hull - hull))} · {hudDist}m
+                  {"♡".repeat(Math.max(0, level.hull + loadoutHud.armorBonus - hull))} · {hudDist}m
                 </p>
                 {clearBanner ? <p className="sky-escort-alert">{clearBanner}</p> : failCue ? <p className="sky-escort-alert">METEOR IMPACT</p> : null}
                 <p className="sky-escort-hint">
                   {seat === "driver"
-                    ? `WASD · Shift boost (${loadoutHud.boostCharges}/${loadoutHud.boostMax}) · score ticks as you roll`
-                    : "Mouse aim · hold fire · streak kills · radar lights threats"}
+                    ? "WASD · Shift boost · drive over glowing upgrade pads · hit the ramps"
+                    : "Mouse aim · hold fire · grab upgrades · radar paints threats"}
                 </p>
               </>
             )}
