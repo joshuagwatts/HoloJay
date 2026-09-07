@@ -808,3 +808,122 @@ kbd {
   from { transform: translateX(-120%); }
   to { transform: translateX(220%); }
 }
+
+.sky-escort-dead {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  text-align: center;
+  background: radial-gradient(ellipse at center, rgba(48, 8, 6, 0.92) 0%, rgba(4, 1, 1, 0.98) 72%);
+  pointer-events: none;
+  animation: sky-dead-in 0.35s ease-out both;
+}
+
+.sky-escort-dead-flash {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 60, 40, 0.35);
+  animation: sky-dead-flash 0.55s ease-out both;
+}
+
+.sky-escort-dead-vignette {
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 120px 40px rgba(0, 0, 0, 0.75);
+  pointer-events: none;
+}
+
+.sky-escort-dead-kicker {
+  position: relative;
+  margin: 0;
+  letter-spacing: 0.45em;
+  text-transform: uppercase;
+  font-size: 12px;
+  color: #ff8a65;
+  animation: sky-intro-rise 0.55s 0.08s ease-out both;
+}
+
+.sky-escort-dead-title {
+  position: relative;
+  margin: 0;
+  font-family: Syne, sans-serif;
+  font-size: clamp(48px, 11vw, 96px);
+  line-height: 0.92;
+  letter-spacing: -0.03em;
+  color: #ffe8e0;
+  text-shadow: 0 0 48px rgba(255, 60, 40, 0.55);
+  animation: sky-intro-rise 0.65s 0.16s ease-out both;
+}
+
+.sky-escort-dead-sub {
+  position: relative;
+  margin: 6px 0 0;
+  font-size: 15px;
+  color: rgba(255, 232, 224, 0.72);
+  animation: sky-intro-rise 0.6s 0.28s ease-out both;
+}
+
+.sky-escort-dead-hint {
+  position: relative;
+  margin: 18px 0 0;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  font-size: 11px;
+  color: rgba(255, 171, 64, 0.85);
+  animation: sky-intro-rise 0.6s 0.4s ease-out both;
+}
+
+@keyframes sky-dead-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes sky-dead-flash {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.sky-escort-crosshair {
+  position: absolute;
+  left: 50%;
+  top: 48%;
+  width: 28px;
+  height: 28px;
+  translate: -50% -50%;
+  pointer-events: none;
+  z-index: 5;
+  opacity: 0.85;
+}
+
+.sky-escort-crosshair-h,
+.sky-escort-crosshair-v {
+  position: absolute;
+  background: #ffab40;
+  box-shadow: 0 0 6px rgba(255, 112, 67, 0.55);
+}
+
+.sky-escort-crosshair-h {
+  left: 4px;
+  right: 4px;
+  top: 50%;
+  height: 2px;
+  margin-top: -1px;
+}
+
+.sky-escort-crosshair-v {
+  top: 4px;
+  bottom: 4px;
+  left: 50%;
+  width: 2px;
+  margin-left: -1px;
+}
+
+.sky-escort-crosshair-ring {
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(255, 171, 64, 0.55);
+  border-radius: 50%;
+}
