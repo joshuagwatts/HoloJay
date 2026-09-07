@@ -915,55 +915,74 @@ kbd {
 .sky-escort-crosshair {
   position: absolute;
   left: 50%;
-  top: 48%;
-  width: 28px;
-  height: 28px;
+  top: 50%;
+  width: 54px;
+  height: 54px;
   translate: -50% -50%;
   pointer-events: none;
   z-index: 5;
-  opacity: 0.85;
+  opacity: 0.95;
 }
 
 .sky-escort-crosshair-h,
 .sky-escort-crosshair-v {
   position: absolute;
-  background: #ffab40;
-  box-shadow: 0 0 6px rgba(255, 112, 67, 0.55);
+  background: #ffe082;
+  box-shadow: 0 0 8px rgba(255, 171, 64, 0.75);
 }
 
-.sky-escort-crosshair-h {
-  left: 4px;
-  right: 4px;
+.sky-escort-crosshair-h.left,
+.sky-escort-crosshair-h.right {
   top: 50%;
+  width: 14px;
   height: 2px;
   margin-top: -1px;
 }
 
-.sky-escort-crosshair-v {
-  top: 4px;
-  bottom: 4px;
+.sky-escort-crosshair-h.left { left: 0; }
+.sky-escort-crosshair-h.right { right: 0; }
+
+.sky-escort-crosshair-v.top,
+.sky-escort-crosshair-v.bottom {
   left: 50%;
   width: 2px;
+  height: 14px;
   margin-left: -1px;
+}
+
+.sky-escort-crosshair-v.top { top: 0; }
+.sky-escort-crosshair-v.bottom { bottom: 0; }
+
+.sky-escort-crosshair-dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  border-radius: 50%;
+  background: #fff8e1;
+  box-shadow: 0 0 10px rgba(255, 213, 79, 0.9);
 }
 
 .sky-escort-crosshair-ring {
   position: absolute;
-  inset: 0;
-  border: 1px solid rgba(255, 171, 64, 0.55);
+  inset: 6px;
+  border: 1px solid rgba(255, 224, 130, 0.55);
   border-radius: 50%;
 }
 
 .sky-escort-crosshair.hit {
   opacity: 1;
-  transform: scale(1.35);
-  filter: brightness(1.6);
+  transform: scale(1.25);
+  filter: brightness(1.7);
 }
 
 .sky-escort-crosshair.hit .sky-escort-crosshair-h,
 .sky-escort-crosshair.hit .sky-escort-crosshair-v,
+.sky-escort-crosshair.hit .sky-escort-crosshair-dot,
 .sky-escort-crosshair.hit .sky-escort-crosshair-ring {
   background: #fff8e1;
   border-color: #fff8e1;
-  box-shadow: 0 0 14px rgba(255, 213, 79, 0.95);
+  box-shadow: 0 0 16px rgba(255, 213, 79, 1);
 }

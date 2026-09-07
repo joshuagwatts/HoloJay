@@ -96,31 +96,93 @@ function levelIndexFromId(id: string | undefined): number {
   return 0;
 }
 
-/** Smooth ash plain with deliberate drive-up ramps — no blocky terrace shelves. */
+/** Winding route ribbon — curves, bridge arch, corkscrew — not a straight ash runway. */
 type Crater = { id: number; x: number; z: number; r: number; depth: number };
+type PathPoint = { t: number; x: number; z: number; y: number; yaw: number };
 
-function baseGround(x: number, z: number, startZ: number, endZ: number): number {
+const ROAD_HALF = 6.6;
+
+function pathXZ(t: number, levelIdx: number, startZ: number, endZ: number): { x: number; z: number } {
   const span = Math.max(1, startZ - endZ);
-  const along = Math.min(1, Math.max(0, (startZ - z) / span));
-  let h =
-    0.4 +
-    along * 2.4 +
-    Math.sin(z * 0.026) * 0.55 +
-    Math.sin(x * 0.032 + z * 0.014) * 0.4 +
-    Math.sin((x * 0.7 + z) * 0.011) * 0.22;
-  // Clear ramp ridges along the route (drive up, crest, drop).
-  const rampCount = 5;
-  for (let i = 1; i <= rampCount; i++) {
-    const peak = i / (rampCount + 1);
-    const d = along - peak;
-    h += Math.exp(-(d * d) * 210) * 4.4;
-    h += Math.exp(-(d * d) * 70) * 1.6;
+  const tt = Math.min(1, Math.max(0, t));
+  const seed = levelIdx * 2.17;
+  const amp = 13 + Math.min(levelIdx, 14) * 1.15;
+  const z = startZ - tt * span;
+  let x =
+    Math.sin(tt * Math.PI * 1.85 + seed) * amp * 0.62 +
+    Math.sin(tt * Math.PI * 3.6 + seed * 1.4) * amp * 0.28;
+  // Corkscrew / helix mid-route
+  if (tt > 0.3 && tt < 0.58) {
+    const u = (tt - 0.3) / 0.28;
+    x += Math.sin(u * Math.PI * 2.6 + seed) * (11 + Math.min(levelIdx, 10) * 0.35);
   }
-  const edge = Math.max(0, Math.abs(x) - 20);
-  h += edge * 0.07;
-  if (z < endZ + 16 && z > endZ - 10 && Math.abs(x) < 11) h = 1.05 + along * 0.15;
-  if (z > startZ - 12) h = Math.min(h, 1.05);
-  return h;
+  // Late S-bend into the gate
+  if (tt > 0.72) {
+    const u = (tt - 0.72) / 0.28;
+    x += Math.sin(u * Math.PI) * (amp * 0.35) * (levelIdx % 2 === 0 ? 1 : -1);
+  }
+  return { x, z };
+}
+
+function pathHeight(t: number, levelIdx: number): number {
+  const tt = Math.min(1, Math.max(0, t));
+  let y = 1.05 + tt * 0.55;
+  // Drive-up ramps
+  y += Math.exp(-((tt - 0.16) ** 2) * 110) * 3.2;
+  y += Math.exp(-((tt - 0.72) ** 2) * 100) * 2.6;
+  // Bridge arch — must stay on the ribbon
+  if (tt > 0.44 && tt < 0.63) {
+    const u = (tt - 0.44) / 0.19;
+    y += Math.sin(u * Math.PI) * (5.8 + Math.min(levelIdx, 8) * 0.15);
+  }
+  // Corkscrew rise
+  if (tt > 0.3 && tt < 0.58) {
+    const u = (tt - 0.3) / 0.28;
+    y += 0.9 + Math.sin(u * Math.PI) * 2.8;
+  }
+  if (tt < 0.05) y = 1.05;
+  if (tt > 0.95) y = Math.min(y, 1.55);
+  return y;
+}
+
+function pathPoint(t: number, levelIdx: number, startZ: number, endZ: number): PathPoint {
+  const tt = Math.min(1, Math.max(0, t));
+  const a = pathXZ(tt, levelIdx, startZ, endZ);
+  const b = pathXZ(Math.min(1, tt + 0.006), levelIdx, startZ, endZ);
+  const yaw = Math.atan2(b.x - a.x, b.z - a.z);
+  return { t: tt, x: a.x, z: a.z, y: pathHeight(tt, levelIdx), yaw };
+}
+
+function nearestOnPath(
+  x: number,
+  z: number,
+  startZ: number,
+  endZ: number,
+  levelIdx: number,
+): { dist: number; pt: PathPoint } {
+  let best = pathPoint(0, levelIdx, startZ, endZ);
+  let bestD = Infinity;
+  const samples = 96;
+  for (let i = 0; i <= samples; i++) {
+    const pt = pathPoint(i / samples, levelIdx, startZ, endZ);
+    const d = Math.hypot(pt.x - x, pt.z - z);
+    if (d < bestD) {
+      bestD = d;
+      best = pt;
+    }
+  }
+  // Refine around best
+  const span = 1 / samples;
+  for (let k = -4; k <= 4; k++) {
+    const t = Math.min(1, Math.max(0, best.t + k * span * 0.2));
+    const pt = pathPoint(t, levelIdx, startZ, endZ);
+    const d = Math.hypot(pt.x - x, pt.z - z);
+    if (d < bestD) {
+      bestD = d;
+      best = pt;
+    }
+  }
+  return { dist: bestD, pt: best };
 }
 
 function craterCarve(x: number, z: number, craters: Crater[]): number {
@@ -134,16 +196,29 @@ function craterCarve(x: number, z: number, craters: Crater[]): number {
   return cut;
 }
 
-function groundY(x: number, z: number, startZ: number, endZ: number, craters: Crater[]): number {
-  return Math.max(-2.8, baseGround(x, z, startZ, endZ) - craterCarve(x, z, craters));
-}
-
-/** World Z of ramp crest centers for chevron markers. */
-function rampCrestZs(startZ: number, endZ: number): number[] {
-  const span = Math.max(1, startZ - endZ);
-  const out: number[] = [];
-  for (let i = 1; i <= 5; i++) out.push(startZ - (i / 6) * span);
-  return out;
+function groundY(
+  x: number,
+  z: number,
+  startZ: number,
+  endZ: number,
+  craters: Crater[],
+  levelIdx: number,
+): number {
+  const { dist, pt } = nearestOnPath(x, z, startZ, endZ, levelIdx);
+  let h: number;
+  if (dist <= ROAD_HALF) {
+    h = pt.y - (dist / ROAD_HALF) ** 2 * 0.28;
+  } else if (dist < ROAD_HALF + 5.5) {
+    const u = (dist - ROAD_HALF) / 5.5;
+    h = pt.y - u * u * 8.5 - 0.4;
+  } else {
+    h = pt.y - 10 - (dist - ROAD_HALF) * 0.4;
+  }
+  // Void under elevated bridge / corkscrew if you leave the ribbon
+  if (pt.y > 3.6 && dist > ROAD_HALF + 0.4) {
+    h = Math.min(h, 0.15);
+  }
+  return Math.max(-3.2, h - craterCarve(x, z, craters));
 }
 
 type Role = "driver" | "gunner";
@@ -290,6 +365,7 @@ export function SkyEscort({ color }: { color: string }) {
   const boostTimer = useRef(0);
   const pickupGroup = useRef<THREE.Group>(null);
   const gateBeacon = useRef<THREE.Group>(null);
+  const gateArch = useRef<THREE.Group>(null);
   const headingArrow = useRef<THREE.Group>(null);
   const introNextRef = useRef(1);
 
@@ -458,11 +534,11 @@ export function SkyEscort({ color }: { color: string }) {
   }
 
   /** Muzzle tip along current aim — bullets leave here. */
+  /** Muzzle tip — gunYaw/gunPitch are world-space, independent of truck yaw. */
   function muzzleWorld() {
     const t = turretWorld();
-    const aimYaw = yaw.current + gunYaw.current;
-    const cy = Math.cos(aimYaw);
-    const sy = Math.sin(aimYaw);
+    const cy = Math.cos(gunYaw.current);
+    const sy = Math.sin(gunYaw.current);
     const cp = Math.cos(gunPitch.current);
     const sp = Math.sin(gunPitch.current);
     const len = 1.9;
@@ -486,18 +562,29 @@ export function SkyEscort({ color }: { color: string }) {
   
   function gy(wx: number, wz: number) {
     const L = activeLevel();
-    return groundY(wx, wz, L.startZ, L.endZ, craters.current);
+    return groundY(wx, wz, L.startZ, L.endZ, craters.current, levelIdxRef.current);
+  }
+
+  function pathAt(t: number) {
+    const L = activeLevel();
+    return pathPoint(t, levelIdxRef.current, L.startZ, L.endZ);
+  }
+
+  function nearPath(wx: number, wz: number) {
+    const L = activeLevel();
+    return nearestOnPath(wx, wz, L.startZ, L.endZ, levelIdxRef.current);
   }
 
   function rebuildGroundSurface() {
     const mesh = groundMesh.current;
     if (!mesh) return;
     const L = activeLevel();
-    const width = L.halfW * 2.6;
-    const length = L.startZ - L.endZ + 48;
+    const idx = levelIdxRef.current;
+    const width = L.halfW * 2.8;
+    const length = L.startZ - L.endZ + 56;
     const midZ = (L.startZ + L.endZ) * 0.5;
-    const segX = 84;
-    const segZ = Math.min(180, Math.max(90, Math.floor(length / 2.2)));
+    const segX = 96;
+    const segZ = Math.min(200, Math.max(100, Math.floor(length / 2)));
     const geo = new THREE.PlaneGeometry(width, length, segX, segZ);
     geo.rotateX(-Math.PI / 2);
     const pos = geo.attributes.position as THREE.BufferAttribute;
@@ -505,18 +592,24 @@ export function SkyEscort({ color }: { color: string }) {
     for (let i = 0; i < pos.count; i++) {
       const wx = pos.getX(i);
       const wz = midZ + pos.getZ(i);
-      const h = groundY(wx, wz, L.startZ, L.endZ, craters.current);
+      const h = groundY(wx, wz, L.startZ, L.endZ, craters.current, idx);
       pos.setY(i, h);
-      // Warm ash → cooler crest on ramps
-      const along = Math.min(1, Math.max(0, (L.startZ - wz) / Math.max(1, L.startZ - L.endZ)));
-      const rampGlow = Math.max(0, h - (0.4 + along * 2.4));
-      colors[i * 3] = 0.32 + rampGlow * 0.22 + along * 0.08;
-      colors[i * 3 + 1] = 0.22 + rampGlow * 0.12;
-      colors[i * 3 + 2] = 0.14 + rampGlow * 0.04;
-      if (craterCarve(wx, wz, craters.current) > 0.4) {
-        colors[i * 3] = 0.12;
-        colors[i * 3 + 1] = 0.07;
-        colors[i * 3 + 2] = 0.05;
+      const { dist, pt } = nearestOnPath(wx, wz, L.startZ, L.endZ, idx);
+      const onRoad = dist <= ROAD_HALF + 0.4;
+      if (craterCarve(wx, wz, craters.current) > 0.35) {
+        colors[i * 3] = 0.1;
+        colors[i * 3 + 1] = 0.06;
+        colors[i * 3 + 2] = 0.04;
+      } else if (onRoad) {
+        // Lit path ribbon — read as road
+        const bridge = pt.y > 3.5 ? 0.18 : 0;
+        colors[i * 3] = 0.42 + bridge + pt.t * 0.08;
+        colors[i * 3 + 1] = 0.3 + bridge * 0.5;
+        colors[i * 3 + 2] = 0.18;
+      } else {
+        colors[i * 3] = 0.18;
+        colors[i * 3 + 1] = 0.12;
+        colors[i * 3 + 2] = 0.09;
       }
     }
     geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
@@ -527,7 +620,7 @@ export function SkyEscort({ color }: { color: string }) {
     prev.dispose();
     groundDirty.current = false;
 
-    // Lit ramp chevrons so the rises are obvious
+    // Markers along ramps / bridge / corkscrew
     const rg = rampGroup.current;
     if (rg) {
       while (rg.children.length) {
@@ -535,24 +628,39 @@ export function SkyEscort({ color }: { color: string }) {
         rg.remove(c);
         if (c instanceof THREE.Mesh) {
           c.geometry.dispose();
-          (c.material as THREE.Material).dispose?.();
         }
       }
-      for (const zz of rampCrestZs(L.startZ, L.endZ)) {
-        const hy = groundY(0, zz, L.startZ, L.endZ, craters.current);
-        const ahead = groundY(0, zz - 4, L.startZ, L.endZ, craters.current);
-        const behind = groundY(0, zz + 4, L.startZ, L.endZ, craters.current);
-        const pitch = Math.atan2(behind - ahead, 8);
+      const marks = [0.16, 0.38, 0.52, 0.72, 0.85];
+      for (const t of marks) {
+        const pt = pathPoint(t, idx, L.startZ, L.endZ);
+        const ahead = pathPoint(Math.min(1, t + 0.02), idx, L.startZ, L.endZ);
         for (const side of [-1, 1]) {
-          const marker = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.8, 3), mats.ramp);
-          marker.position.set(side * 6.5, hy + 0.9, zz);
-          marker.rotation.set(pitch + 0.2, 0, 0);
+          const nx = -Math.sin(pt.yaw + Math.PI / 2);
+          const nz = -Math.cos(pt.yaw + Math.PI / 2);
+          const marker = new THREE.Mesh(new THREE.ConeGeometry(0.45, 1.5, 3), mats.ramp);
+          marker.position.set(pt.x + nx * side * 5.2, pt.y + 0.85, pt.z + nz * side * 5.2);
+          marker.rotation.set(0.25, pt.yaw, 0);
           rg.add(marker);
         }
-        const strip = new THREE.Mesh(new THREE.BoxGeometry(14, 0.08, 3.2), mats.ramp);
-        strip.position.set(0, hy + 0.05, zz);
-        strip.rotation.x = pitch;
+        const strip = new THREE.Mesh(new THREE.BoxGeometry(11, 0.07, 2.4), mats.ramp);
+        strip.position.set(pt.x, pt.y + 0.04, pt.z);
+        strip.rotation.y = pt.yaw;
         rg.add(strip);
+        // Bridge glow rails
+        if (t > 0.45 && t < 0.62) {
+          for (const side of [-1, 1]) {
+            const nx = -Math.sin(pt.yaw + Math.PI / 2);
+            const nz = -Math.cos(pt.yaw + Math.PI / 2);
+            const rail = new THREE.Mesh(
+              new THREE.BoxGeometry(0.18, 0.7, 2.2),
+              mats.ramp,
+            );
+            rail.position.set(pt.x + nx * side * ROAD_HALF * 0.92, pt.y + 0.45, pt.z + nz * side * ROAD_HALF * 0.92);
+            rail.rotation.y = pt.yaw;
+            rg.add(rail);
+          }
+        }
+        void ahead;
       }
     }
   }
@@ -560,18 +668,21 @@ export function SkyEscort({ color }: { color: string }) {
   function spawnPickups(L: LevelDef) {
     const list: Pickup[] = [];
     const kinds: UpgradeId[] = ["boost", "armor", "radar", "turret", "boost"];
-    // Always seed a full upgrade set on the route — visible and frequent.
     const pads = 5 + Math.min(3, Math.floor(levelIdxRef.current / 2));
     for (let i = 0; i < pads; i++) {
-      const tAlong = 0.14 + (i / Math.max(1, pads - 1)) * 0.72;
-      const zz = L.startZ + (L.endZ - L.startZ) * tAlong;
-      const xx = (i % 2 === 0 ? 1 : -1) * (5 + (i % 3) * 3.5);
+      const tAlong = 0.12 + (i / Math.max(1, pads - 1)) * 0.76;
+      const pt = pathPoint(tAlong, levelIdxRef.current, L.startZ, L.endZ);
+      const side = i % 2 === 0 ? 1 : -1;
+      const nx = -Math.sin(pt.yaw + Math.PI / 2);
+      const nz = -Math.cos(pt.yaw + Math.PI / 2);
+      const xx = pt.x + nx * side * 3.2;
+      const zz = pt.z + nz * side * 3.2;
       const kind = kinds[i % kinds.length]!;
       list.push({
         id: nextId.current++,
         kind,
         x: xx,
-        y: groundY(xx, zz, L.startZ, L.endZ, craters.current) + 1.1,
+        y: groundY(xx, zz, L.startZ, L.endZ, craters.current, levelIdxRef.current) + 1.1,
         z: zz,
         taken: false,
       });
@@ -624,14 +735,16 @@ export function SkyEscort({ color }: { color: string }) {
 
   function snapSeatCam(role: Role) {
     if (role === "gunner") {
-      gunYaw.current = 0;
-      gunPitch.current = 0.08;
+      // World-space aim — starts facing the route, not locked to chassis yaw.
+      const face = nearPath(x.current, z.current).pt.yaw || Math.PI;
+      gunYaw.current = face;
+      gunPitch.current = 0.06;
       const t = turretWorld();
-      camera.position.set(t.x, t.y + 0.55, t.z + 0.7);
+      camera.position.set(t.x - Math.sin(gunYaw.current) * 0.9, t.y + 0.55, t.z - Math.cos(gunYaw.current) * 0.9);
       camera.lookAt(
-        t.x + Math.sin(yaw.current) * 30,
-        t.y + 1.2,
-        t.z + Math.cos(yaw.current) * 30,
+        t.x + Math.sin(gunYaw.current) * 30,
+        t.y + 1.0,
+        t.z + Math.cos(gunYaw.current) * 30,
       );
     } else {
       const back = 12;
@@ -667,7 +780,11 @@ export function SkyEscort({ color }: { color: string }) {
     speed.current = 0;
     falling.current = false;
     keys.current = { throttle: 0, steer: 0 };
-    z.current = Math.min(z.current, activeLevel().endZ);
+    z.current = Math.min(z.current, activeLevel().endZ + 4);
+    const g = pathAt(1);
+    x.current = g.x;
+    z.current = g.z;
+    y.current = g.y + 0.85;
     introT.current = 1.9;
     introNextRef.current = next;
     setIntroLevel({ idx: next, name: nextL.name });
@@ -713,10 +830,13 @@ export function SkyEscort({ color }: { color: string }) {
       if (asRole === "driver") gunnerIdRef.current = peer.id;
       else driverIdRef.current = peer.id;
     }
-    x.current = 0;
-    z.current = L.startZ;
-    y.current = gy(0, L.startZ) + 0.85;
-    yaw.current = Math.PI;
+    const start = pathAt(0);
+    x.current = start.x;
+    z.current = start.z;
+    y.current = start.y + 0.85;
+    yaw.current = start.yaw;
+    gunYaw.current = start.yaw;
+    gunPitch.current = 0.06;
     speed.current = 0;
     falling.current = false;
     invuln.current = 0;
@@ -749,11 +869,12 @@ export function SkyEscort({ color }: { color: string }) {
     // Seed dive ships so the first seconds aren't an empty commute.
     const seedN = 2 + Math.min(2, Math.floor(nextLevelIdx / 4));
     for (let i = 0; i < seedN; i++) {
+      const pt = pathPoint(0.08 + i * 0.07, nextLevelIdx, L.startZ, L.endZ);
       aliens.current.push({
         id: nextId.current++,
-        x: (Math.random() - 0.5) * 16,
-        y: 6 + Math.random() * 5,
-        z: L.startZ - 18 - i * 10 - Math.random() * 8,
+        x: pt.x + (Math.random() - 0.5) * 8,
+        y: pt.y + 5 + Math.random() * 4,
+        z: pt.z,
         hp: nextLevelIdx < 3 ? 1 : 2,
       });
     }
@@ -970,11 +1091,12 @@ export function SkyEscort({ color }: { color: string }) {
   useFrame((_, dt) => {
     const clamped = Math.min(dt, 0.05);
     const level = activeLevel();
-    const progress = Math.min(1, Math.max(0, (level.startZ - z.current) / (level.startZ - level.endZ)));
+    const progress = nearPath(x.current, z.current).pt.t;
     hudAcc.current += clamped;
     if (hudAcc.current > 0.12) {
       hudAcc.current = 0;
-      setHudDist(Math.max(0, Math.floor(z.current - level.endZ)));
+      const gate = pathAt(1);
+      setHudDist(Math.max(0, Math.floor(Math.hypot(gate.x - x.current, gate.z - z.current))));
     }
 
     if (failCueT.current > 0) {
@@ -1014,15 +1136,16 @@ export function SkyEscort({ color }: { color: string }) {
 
       if (driverIdRef.current === "ai") {
         throttle = 0.95;
+        const look = pathAt(Math.min(1, nearPath(x.current, z.current).pt.t + 0.04));
+        const wantYaw = Math.atan2(look.x - x.current, look.z - z.current);
+        let err = wantYaw - yaw.current;
+        while (err > Math.PI) err -= Math.PI * 2;
+        while (err < -Math.PI) err += Math.PI * 2;
+        steer = THREE.MathUtils.clamp(err * 2.4, -1, 1);
         const threat = meteors.current.find(
-          (m) => m.z < z.current + 14 && m.z > z.current - 4 && Math.abs(m.x - x.current) < 6,
+          (m) => Math.hypot(m.x - x.current, m.z - z.current) < 10 && m.y < 8,
         );
-        const dive = aliens.current.find(
-          (a) => a.z < z.current + 10 && a.z > z.current - 6 && Math.abs(a.x - x.current) < 5 && a.y < 5,
-        );
-        if (dive) steer = dive.x > x.current ? -1 : 1;
-        else if (threat) steer = threat.x > x.current ? 1 : -1;
-        else steer = x.current > 5 ? 0.55 : x.current < -5 ? -0.55 : Math.sin(performance.now() * 0.001) * 0.15;
+        if (threat) steer += threat.x > x.current ? -0.7 : 0.7;
       }
 
       if (!falling.current) {
@@ -1039,7 +1162,16 @@ export function SkyEscort({ color }: { color: string }) {
         const v = speed.current;
         x.current += Math.sin(yaw.current) * v * clamped;
         z.current += Math.cos(yaw.current) * v * clamped;
+        // Soft corridor — pull back onto the winding ribbon if you drift off.
+        const on = nearPath(x.current, z.current);
+        if (on.dist > ROAD_HALF + 1.2) {
+          const pull = Math.min(1, (on.dist - ROAD_HALF) / 8) * 10 * clamped;
+          x.current += (on.pt.x - x.current) * pull;
+          z.current += (on.pt.z - z.current) * pull * 0.35;
+        }
         x.current = THREE.MathUtils.clamp(x.current, -level.halfW + 2.5, level.halfW - 2.5);
+        // Fall off bridge / corkscrew void
+        if (on.dist > ROAD_HALF + 2.8 && on.pt.y > 3.4) falling.current = true;
         // Driver gets drip score for meters burned — seat isn't just a taxi.
         if (Math.abs(v) > 4) {
           distScoreAcc.current += Math.abs(v) * clamped * 0.45;
@@ -1060,17 +1192,12 @@ export function SkyEscort({ color }: { color: string }) {
         if (y.current < surface - 4 || y.current < -4) {
           falling.current = false;
           hurt(1);
-          // Pop back onto solid ground near the truck
-          let nx = x.current;
-          let nz = z.current;
-          for (let tries = 0; tries < 8; tries++) {
-            nx = x.current + (Math.random() - 0.5) * 14;
-            nz = z.current + (Math.random() - 0.5) * 10;
-            if (craterCarve(nx, nz, craters.current) < 0.6) break;
-          }
-          x.current = nx;
-          z.current = nz;
-          y.current = gy(nx, nz) + 0.85;
+          // Snap back onto the route ribbon
+          const back = nearPath(x.current, z.current).pt;
+          x.current = back.x;
+          z.current = back.z;
+          y.current = back.y + 0.85;
+          yaw.current = back.yaw;
         }
       } else {
         const ahead = gy(
@@ -1153,15 +1280,16 @@ export function SkyEscort({ color }: { color: string }) {
       const alienEvery = Math.max(0.36, level.alienEvery - progress * 0.55);
       if (alienAcc.current >= alienEvery) {
         alienAcc.current = 0;
-        // Wave packs: sometimes drop a pair so the sky feels busy.
+        // Wave packs ahead along the winding route.
         const pack = Math.random() < 0.35 + Math.min(0.35, levelIdxRef.current * 0.04) ? 2 : 1;
+        const here = nearPath(x.current, z.current).pt.t;
         for (let i = 0; i < pack; i++) {
+          const pt = pathAt(Math.min(0.98, here + 0.08 + Math.random() * 0.12 + i * 0.03));
           aliens.current.push({
             id: nextId.current++,
-            x: x.current + (Math.random() - 0.5) * Math.min(28, level.halfW),
-            y: 5 + Math.random() * 7,
-            z: z.current - 12 - Math.random() * 34 - i * 4,
-            // Early ships pop in one shot; later get tankier.
+            x: pt.x + (Math.random() - 0.5) * 10,
+            y: pt.y + 5 + Math.random() * 6,
+            z: pt.z,
             hp: levelIdxRef.current < 3 ? 1 : levelIdxRef.current < 10 ? 2 : 3,
           });
         }
@@ -1205,9 +1333,8 @@ export function SkyEscort({ color }: { color: string }) {
           if (rin.fire) fireHeld.current = true;
         }
         if (fireHeld.current && fireCd.current <= 0) {
-          const aimYaw = yaw.current + gunYaw.current;
-          const cy = Math.cos(aimYaw);
-          const sy = Math.sin(aimYaw);
+          const cy = Math.cos(gunYaw.current);
+          const sy = Math.sin(gunYaw.current);
           const cp = Math.cos(gunPitch.current);
           const sp = Math.sin(gunPitch.current);
           const tip = muzzleWorld();
@@ -1290,9 +1417,10 @@ export function SkyEscort({ color }: { color: string }) {
       for (const bl of blasts.current) bl.age += clamped;
       blasts.current = blasts.current.filter((b) => b.age < 0.55);
 
-      // Gate zone — generous trigger, then motion-graphic intro (auto, no Space).
-      const gateReach = level.endZ + level.tile * 2.5;
-      if (!advancing.current && phaseRef.current === "run" && z.current <= gateReach) {
+      // Gate zone — near the winding finish, not a flat Z plane.
+      const gate = pathAt(1);
+      const gateDist = Math.hypot(gate.x - x.current, gate.z - z.current);
+      if (!advancing.current && phaseRef.current === "run" && (gateDist < 10 || progress > 0.965)) {
         beginAdvance();
       }
 
@@ -1322,13 +1450,11 @@ export function SkyEscort({ color }: { color: string }) {
     }
 
     // Failsafe: solo / host-desync still advance when crossing the gate.
-    if (
-      !advancing.current &&
-      phaseRef.current === "run" &&
-      (solo || isHost) &&
-      z.current <= activeLevel().endZ + activeLevel().tile * 2.5
-    ) {
-      beginAdvance();
+    if (!advancing.current && phaseRef.current === "run" && (solo || isHost)) {
+      const gate = pathAt(1);
+      if (Math.hypot(gate.x - x.current, gate.z - z.current) < 10 || nearPath(x.current, z.current).pt.t > 0.965) {
+        beginAdvance();
+      }
     }
 
     if (phaseRef.current === "run" && !isHost && seatRef.current === "gunner") {
@@ -1351,7 +1477,13 @@ export function SkyEscort({ color }: { color: string }) {
       buggy.current.rotation.y = yaw.current;
       buggy.current.rotation.z = keys.current.steer * -0.14;
     }
-    if (gunMount.current) gunMount.current.rotation.y = gunYaw.current;
+    // World-space turret aim — independent of truck yaw (gunner free-look).
+    if (gunMount.current) {
+      let rel = gunYaw.current - yaw.current;
+      while (rel > Math.PI) rel -= Math.PI * 2;
+      while (rel < -Math.PI) rel += Math.PI * 2;
+      gunMount.current.rotation.y = rel;
+    }
     if (gunPitchMount.current) {
       gunPitchMount.current.rotation.x = -gunPitch.current;
       // Local gunner uses the camera-locked FP gun — hide world barrel to avoid double mesh.
@@ -1458,17 +1590,27 @@ export function SkyEscort({ color }: { color: string }) {
         ),
     );
 
-    // Gate beacon + heading chevron — always show where to drive
+    // Gate beacon + heading chevron — track the winding finish
+    const gatePt = pathAt(1);
     if (gateBeacon.current) {
-      const gh = gy(0, level.endZ);
-      gateBeacon.current.position.set(0, gh + 4.5 + Math.sin(performance.now() * 0.003) * 0.35, level.endZ);
+      gateBeacon.current.position.set(
+        gatePt.x,
+        gatePt.y + 4.5 + Math.sin(performance.now() * 0.003) * 0.35,
+        gatePt.z,
+      );
       gateBeacon.current.visible = phaseRef.current === "run" || phaseRef.current === "intro";
     }
+    if (gateArch.current) {
+      gateArch.current.position.set(gatePt.x, gatePt.y, gatePt.z);
+      gateArch.current.rotation.y = gatePt.yaw;
+      gateArch.current.visible = true;
+    }
     if (headingArrow.current && phaseRef.current === "run") {
-      const dx = 0 - x.current;
-      const dz = level.endZ - z.current;
+      const look = pathAt(Math.min(1, nearPath(x.current, z.current).pt.t + 0.06));
+      const dx = look.x - x.current;
+      const dz = look.z - z.current;
       const ang = Math.atan2(dx, dz);
-      const dist = Math.hypot(dx, dz);
+      const dist = Math.hypot(gatePt.x - x.current, gatePt.z - z.current);
       const ahead = Math.min(14, Math.max(6, dist * 0.18));
       headingArrow.current.visible = dist > 12;
       headingArrow.current.position.set(
@@ -1503,34 +1645,24 @@ export function SkyEscort({ color }: { color: string }) {
         persp.updateProjectionMatrix();
       }
     } else if (seatRef.current === "gunner" && phaseRef.current === "run") {
-      // Seated Warthog gunner: head behind the gun, looking down the barrel — NOT a drone above the roof.
-      if (buggy.current) buggy.current.updateMatrixWorld(true);
-      const pivot = gunPivotWorld.current;
-      const quat = gunQuatWorld.current;
-      if (gunMount.current) {
-        gunMount.current.getWorldPosition(pivot);
-        gunMount.current.getWorldQuaternion(quat);
-      } else {
-        const t = turretWorld();
-        pivot.set(t.x, t.y, t.z);
-        quat.identity();
-      }
-      const aimYaw = yaw.current + gunYaw.current;
-      const cy = Math.cos(aimYaw);
-      const sy = Math.sin(aimYaw);
+      // Gunner free-look: seat follows the truck, aim is pure world yaw/pitch (not chassis-locked).
+      const t = turretWorld();
+      const cy = Math.cos(gunYaw.current);
+      const sy = Math.sin(gunYaw.current);
       const cp = Math.cos(gunPitch.current);
       const sp = Math.sin(gunPitch.current);
-      // Local seat: slightly up + behind the ring (turret +Z aims vehicle-forward at yaw 0).
-      const eye = gunEyeLocal.current.set(0, 0.58, -0.95);
-      eye.applyQuaternion(quat);
-      camera.position.set(pivot.x + eye.x + ox * 0.22, pivot.y + eye.y + oy * 0.22, pivot.z + eye.z);
+      // Eye sits behind the aim vector — truck turns do not whip the view.
+      camera.position.set(
+        t.x - sy * 0.95 + ox * 0.12,
+        t.y + 0.55 + oy * 0.12,
+        t.z - cy * 0.95,
+      );
       const dir = gunLookDir.current.set(sy * cp, sp, cy * cp);
       camera.lookAt(
-        camera.position.x + dir.x * 48,
-        camera.position.y + dir.y * 48,
-        camera.position.z + dir.z * 48,
+        camera.position.x + dir.x * 60,
+        camera.position.y + dir.y * 60,
+        camera.position.z + dir.z * 60,
       );
-      // Cab/hood on layer 1 — hide so they never fill the gunner frame.
       camera.layers.set(0);
       if (persp.isPerspectiveCamera) {
         persp.fov = THREE.MathUtils.damp(persp.fov, hitFlash ? 74 : 68, 10, clamped);
@@ -1600,25 +1732,26 @@ export function SkyEscort({ color }: { color: string }) {
         <boxGeometry args={[22, 5, 1.2]} />
         <meshStandardMaterial color="#3e2723" emissive={color} emissiveIntensity={0.2} />
       </mesh>
-      {/* Drive-through finish arch + lit pad (not a solid wall you clip into). */}
-      <mesh position={[-7.5, 3.2, level.endZ]} castShadow>
-        <boxGeometry args={[1.2, 6.4, 1.2]} />
-        <meshStandardMaterial color="#ffe082" emissive="#ffd54f" emissiveIntensity={1.1} />
-      </mesh>
-      <mesh position={[7.5, 3.2, level.endZ]} castShadow>
-        <boxGeometry args={[1.2, 6.4, 1.2]} />
-        <meshStandardMaterial color="#ffe082" emissive="#ffd54f" emissiveIntensity={1.1} />
-      </mesh>
-      <mesh position={[0, 6.2, level.endZ]} castShadow>
-        <boxGeometry args={[16.2, 1.1, 1.2]} />
-        <meshStandardMaterial color="#ffe082" emissive="#ffd54f" emissiveIntensity={1.25} />
-      </mesh>
-      <mesh position={[0, 0.08, level.endZ]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[16, 10]} />
-        <meshStandardMaterial color="#ffecb3" emissive="#ffd54f" emissiveIntensity={0.55} transparent opacity={0.85} />
-      </mesh>
-      <pointLight position={[0, 5, level.endZ]} color="#ffe082" intensity={18} distance={28} />
-
+      {/* Finish arch follows the winding gate each frame */}
+      <group ref={gateArch} position={[0, 1, level.endZ]}>
+        <mesh position={[-7.5, 3.2, 0]} castShadow>
+          <boxGeometry args={[1.2, 6.4, 1.2]} />
+          <meshStandardMaterial color="#ffe082" emissive="#ffd54f" emissiveIntensity={1.1} />
+        </mesh>
+        <mesh position={[7.5, 3.2, 0]} castShadow>
+          <boxGeometry args={[1.2, 6.4, 1.2]} />
+          <meshStandardMaterial color="#ffe082" emissive="#ffd54f" emissiveIntensity={1.1} />
+        </mesh>
+        <mesh position={[0, 6.2, 0]} castShadow>
+          <boxGeometry args={[16.2, 1.1, 1.2]} />
+          <meshStandardMaterial color="#ffe082" emissive="#ffd54f" emissiveIntensity={1.25} />
+        </mesh>
+        <mesh position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[16, 10]} />
+          <meshStandardMaterial color="#ffecb3" emissive="#ffd54f" emissiveIntensity={0.55} transparent opacity={0.85} />
+        </mesh>
+        <pointLight position={[0, 5, 0]} color="#ffe082" intensity={18} distance={28} />
+      </group>
       <mesh ref={groundMesh} material={mats.ground} receiveShadow>
         <planeGeometry args={[10, 10, 1, 1]} />
       </mesh>
@@ -1810,8 +1943,12 @@ export function SkyEscort({ color }: { color: string }) {
           )}
           {phase === "run" && seat === "gunner" && (
             <div className={`sky-escort-crosshair${hitFlash ? " hit" : ""}`} aria-hidden>
-              <span className="sky-escort-crosshair-h" />
-              <span className="sky-escort-crosshair-v" />
+              <span className="sky-escort-crosshair-gap" />
+              <span className="sky-escort-crosshair-h left" />
+              <span className="sky-escort-crosshair-h right" />
+              <span className="sky-escort-crosshair-v top" />
+              <span className="sky-escort-crosshair-v bottom" />
+              <span className="sky-escort-crosshair-dot" />
               <span className="sky-escort-crosshair-ring" />
             </div>
           )}
@@ -1828,8 +1965,8 @@ export function SkyEscort({ color }: { color: string }) {
                 </p>
                 <p className="sky-escort-hint">
                   {seat === "driver"
-                    ? "Drive the ash ramps, scoop upgrade pads, Shift-boost to the gate"
-                    : "Bed turret — shred dive-bombers, grab turret/radar pads for power"}
+                    ? "Carve the winding road — bridge, corkscrew, upgrade pads — Shift-boost to the gate"
+                    : "Free-look turret — mouse aims the sky, crosshair on dive-bombers"}
                 </p>
                 <div className="sky-escort-actions">
                   <button type="button" className={seat === "driver" ? "on" : ""} onClick={() => pickSeat("driver")}>
@@ -1882,8 +2019,8 @@ export function SkyEscort({ color }: { color: string }) {
                 {clearBanner ? <p className="sky-escort-alert">{clearBanner}</p> : failCue ? <p className="sky-escort-alert">METEOR IMPACT</p> : null}
                 <p className="sky-escort-hint">
                   {seat === "driver"
-                    ? "WASD · Shift boost · drive over glowing upgrade pads · hit the ramps"
-                    : "Mouse aim · hold fire · grab upgrades · radar paints threats"}
+                    ? "WASD · Shift boost · stay on the ribbon · bridge & corkscrew"
+                    : "Mouse free-look · hold fire · upgrades · radar paints threats"}
                 </p>
               </>
             )}
