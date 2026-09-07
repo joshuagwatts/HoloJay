@@ -457,12 +457,12 @@ export function SkyEscort({ color }: { color: string }) {
     }
   }
 
-  /** Bed-turret pivot — rear of open truck bed, above the rails. */
+  /** Bed-turret pivot — high on the open truck bed. */
   function turretWorld() {
     const back = 2.35;
     const ox = Math.sin(yaw.current) * -back;
     const oz = Math.cos(yaw.current) * -back;
-    return { x: x.current + ox, y: y.current + 1.85, z: z.current + oz };
+    return { x: x.current + ox, y: y.current + 2.15, z: z.current + oz };
   }
 
   function addScore(pts: number, label?: string) {
@@ -586,14 +586,14 @@ function buildTerrain() {
   function snapSeatCam(role: Role) {
     if (role === "gunner") {
       gunYaw.current = 0;
-      gunPitch.current = 0.12;
+      gunPitch.current = 0.15;
       const t = turretWorld();
-      const eyeUp = 0.55;
-      camera.position.set(t.x, t.y + eyeUp, t.z + 0.35);
+      const eyeUp = 1.45;
+      camera.position.set(t.x, t.y + eyeUp, t.z + 0.2);
       camera.lookAt(
-        x.current + Math.sin(yaw.current) * 28,
-        t.y + eyeUp + 2.5,
-        z.current + Math.cos(yaw.current) * 28,
+        x.current + Math.sin(yaw.current) * 32,
+        t.y + eyeUp + 1.5,
+        z.current + Math.cos(yaw.current) * 32,
       );
     } else {
       const back = 12;
@@ -630,11 +630,13 @@ function buildTerrain() {
     falling.current = false;
     keys.current = { throttle: 0, steer: 0 };
     z.current = Math.min(z.current, activeLevel().endZ);
-    introT.current = 3.4;
+    introT.current = 3.6;
     introNextRef.current = next;
     setIntroLevel({ idx: next, name: nextL.name });
     addScore(hullRef.current * 50 + 200, `GATE +${hullRef.current * 50 + 200}`);
     setPhaseBoth("intro");
+    // Drop pointer lock so the motion graphic is obvious for both seats.
+    document.exitPointerLock?.();
     emitMinigame(instanceId, "sky-escort", {
       type: "role",
       driverId: driverIdRef.current,
@@ -767,6 +769,8 @@ function buildTerrain() {
       }
 
       if (p === "intro" && (e.code === "Space" || e.code === "Enter")) {
+        // Don't let a held Space (gunner fire) or accidental tap skip the graphic.
+        if (introT.current > 2.4) return;
         e.preventDefault();
         finishIntro();
         return;
@@ -1251,7 +1255,7 @@ function buildTerrain() {
     if (gunPitchMount.current) {
       gunPitchMount.current.rotation.x = -gunPitch.current;
       // Local gunner uses the camera-locked FP gun — hide world barrel to avoid double mesh.
-      gunPitchMount.current.visible = !(seatRef.current === "gunner" && phaseRef.current !== "ready");
+      gunPitchMount.current.visible = !(seatRef.current === "gunner" && phaseRef.current === "run");
     }
 
     syncGroup(
@@ -1377,31 +1381,46 @@ function buildTerrain() {
     const ox = (Math.random() - 0.5) * sh;
     const oy = (Math.random() - 0.5) * sh;
     const persp = camera as THREE.PerspectiveCamera;
-    const gunnerLive = seatRef.current === "gunner" && phaseRef.current !== "ready";
-    if (gunnerLive) {
-      // Standing in the truck bed behind the ring — clear sightlines over the low cab.
+
+    // Level motion graphic: shared cinematic for BOTH seats (not turret POV).
+    if (phaseRef.current === "intro") {
+      if (fpGun.current) {
+        fpGun.current.visible = false;
+        if (fpGun.current.parent === camera) camera.remove(fpGun.current);
+      }
+      const tx = x.current - Math.sin(yaw.current) * 16;
+      const ty = y.current + 9.5;
+      const tz = z.current - Math.cos(yaw.current) * 16;
+      camera.position.set(tx, ty, tz);
+      camera.lookAt(x.current, y.current + 1.2, z.current - Math.cos(yaw.current) * 8);
+      if (persp.isPerspectiveCamera) {
+        persp.fov = 58;
+        persp.updateProjectionMatrix();
+      }
+    } else if (seatRef.current === "gunner" && phaseRef.current === "run") {
+      // High bed seat — eyes well above the cab so you see the field.
       const t = turretWorld();
       const aimYaw = yaw.current + gunYaw.current;
       const cy = Math.cos(aimYaw);
       const sy = Math.sin(aimYaw);
       const cp = Math.cos(gunPitch.current);
       const sp = Math.sin(gunPitch.current);
-      const eyeBack = 0.62;
-      const eyeUp = 0.55;
+      const eyeBack = 0.45;
+      const eyeUp = 1.45;
       camera.position.set(
-        t.x - sy * eyeBack + ox * 0.12,
-        t.y + eyeUp + oy * 0.12,
+        t.x - sy * eyeBack + ox * 0.1,
+        t.y + eyeUp + oy * 0.1,
         t.z - cy * eyeBack,
       );
-      camera.lookAt(t.x + sy * cp * 42, t.y + eyeUp + sp * 42, t.z + cy * cp * 42);
+      camera.lookAt(t.x + sy * cp * 45, t.y + eyeUp + sp * 45, t.z + cy * cp * 45);
       if (persp.isPerspectiveCamera) {
-        persp.fov = 62;
+        persp.fov = 64;
         persp.updateProjectionMatrix();
       }
       if (fpGun.current) {
         if (fpGun.current.parent !== camera) camera.add(fpGun.current);
         fpGun.current.visible = true;
-        fpGun.current.position.set(0, -0.52, -0.82);
+        fpGun.current.position.set(0, -0.62, -0.9);
         fpGun.current.rotation.set(0, 0, 0);
       }
     } else {
@@ -1573,12 +1592,17 @@ function buildTerrain() {
           <ringGeometry args={[0.7, 1.05, 24]} />
           <meshStandardMaterial color="#5d4037" metalness={0.7} roughness={0.35} side={THREE.DoubleSide} />
         </mesh>
-        <group ref={gunMount} position={[0, 1.85, -2.35]}>
-          <mesh position={[0, -0.2, 0]}>
-            <cylinderGeometry args={[0.48, 0.55, 0.32, 16]} />
+        <group ref={gunMount} position={[0, 2.15, -2.35]}>
+          <mesh position={[0, -0.25, 0]}>
+            <cylinderGeometry args={[0.48, 0.55, 0.45, 16]} />
             <meshStandardMaterial color="#3e2723" metalness={0.6} roughness={0.4} />
           </mesh>
-          <mesh position={[0, -0.55, -0.35]}>
+          {/* pedestal so the seat sits tall over the bed */}
+          <mesh position={[0, -0.7, 0]}>
+            <cylinderGeometry args={[0.22, 0.35, 0.55, 8]} />
+            <meshStandardMaterial color="#2c2118" metalness={0.5} />
+          </mesh>
+          <mesh position={[0, -0.85, -0.35]}>
             <boxGeometry args={[0.55, 0.14, 0.45]} />
             <meshStandardMaterial color="#1b1511" roughness={0.85} />
           </mesh>

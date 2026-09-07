@@ -686,13 +686,14 @@ kbd {
 
 
 .sky-escort-intro {
-  position: absolute;
+  position: fixed;
   inset: 0;
+  z-index: 9999;
   display: grid;
   place-content: center;
   gap: 10px;
   text-align: center;
-  background: radial-gradient(ellipse at center, rgba(40, 18, 8, 0.92) 0%, rgba(6, 3, 2, 0.96) 70%);
+  background: radial-gradient(ellipse at center, rgba(40, 18, 8, 0.94) 0%, rgba(6, 3, 2, 0.98) 70%);
   overflow: hidden;
   pointer-events: none;
   animation: sky-intro-in 0.45s ease-out both;
