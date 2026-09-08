@@ -1011,6 +1011,230 @@ kbd {
   text-transform: uppercase;
 }
 
+.sky-escort-vitals-gun {
+  color: #80d8ff;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+
+/* Pre-run garage — vehicle / paint / turret */
+.sky-escort-garage {
+  position: fixed;
+  inset: 0;
+  z-index: 10045;
+  display: grid;
+  place-content: center;
+  gap: 10px;
+  padding: 24px 16px;
+  text-align: center;
+  background:
+    radial-gradient(ellipse at 30% 20%, rgba(64, 196, 255, 0.12), transparent 45%),
+    radial-gradient(ellipse at 70% 80%, rgba(255, 112, 67, 0.14), transparent 50%),
+    rgba(8, 4, 2, 0.82);
+  color: #f4ecdc;
+  pointer-events: auto;
+  overflow: auto;
+}
+
+.sky-escort-garage-kicker {
+  margin: 0;
+  letter-spacing: 0.35em;
+  text-transform: uppercase;
+  font-size: 12px;
+  color: #ffab40;
+}
+
+.sky-escort-garage-title {
+  margin: 0;
+  font-family: Syne, sans-serif;
+  font-size: clamp(36px, 7vw, 58px);
+  letter-spacing: -0.02em;
+}
+
+.sky-escort-garage-sub,
+.sky-escort-garage-hint,
+.sky-escort-garage-label,
+.sky-escort-garage-paintname {
+  margin: 0;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 12px;
+  color: rgba(244, 236, 220, 0.55);
+}
+
+.sky-escort-garage-label {
+  margin-top: 12px;
+  text-align: left;
+  color: rgba(255, 171, 64, 0.75);
+}
+
+.sky-escort-garage-paintname {
+  margin-top: 6px;
+  text-align: left;
+  color: rgba(244, 236, 220, 0.7);
+}
+
+.sky-escort-garage-cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 340px));
+  gap: 16px;
+  margin-top: 8px;
+  justify-content: center;
+}
+
+@media (max-width: 800px) {
+  .sky-escort-garage-cols {
+    grid-template-columns: 1fr;
+    width: min(92vw, 360px);
+    margin-inline: auto;
+  }
+}
+
+.sky-escort-garage-panel {
+  border: 1px solid rgba(244, 236, 220, 0.16);
+  background: rgba(12, 8, 5, 0.88);
+  padding: 14px;
+  text-align: left;
+}
+
+.sky-escort-garage-panel.locked {
+  opacity: 0.55;
+}
+
+.sky-escort-garage-panel header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 10px;
+  font-family: Syne, sans-serif;
+}
+
+.sky-escort-garage-panel header strong {
+  font-size: 18px;
+}
+
+.sky-escort-garage-panel header span {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #ffab40;
+}
+
+.sky-escort-garage-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.sky-escort-garage-grid.kit {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.sky-escort-garage-card {
+  appearance: none;
+  border: 1px solid rgba(244, 236, 220, 0.18);
+  background: rgba(18, 12, 8, 0.95);
+  color: #f4ecdc;
+  padding: 12px 12px;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.sky-escort-garage-card.slim {
+  padding: 8px 6px;
+  text-align: center;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+.sky-escort-garage-card strong {
+  font-family: Syne, sans-serif;
+  font-size: 15px;
+}
+
+.sky-escort-garage-card em {
+  font-style: normal;
+  font-size: 11px;
+  color: rgba(244, 236, 220, 0.55);
+  letter-spacing: 0.02em;
+}
+
+.sky-escort-garage-card:hover:not(:disabled),
+.sky-escort-garage-card:focus-visible {
+  border-color: var(--up-color, #ffab40);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.sky-escort-garage-card.on {
+  border-color: var(--up-color, #ffab40);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--up-color, #ffab40) 45%, transparent);
+}
+
+.sky-escort-garage-card:disabled {
+  cursor: default;
+}
+
+.sky-escort-garage-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sky-escort-garage-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  border: 1px solid rgba(244, 236, 220, 0.25);
+  cursor: pointer;
+  padding: 0;
+}
+
+.sky-escort-garage-swatch:disabled {
+  cursor: default;
+}
+
+.sky-escort-garage-seat {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 12px;
+}
+
+.sky-escort-garage-seat button {
+  appearance: none;
+  border: 1px solid rgba(244, 236, 220, 0.25);
+  background: rgba(18, 12, 8, 0.95);
+  color: #f4ecdc;
+  padding: 10px 16px;
+  font-family: Syne, sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.sky-escort-garage-seat button.on {
+  border-color: #ffab40;
+  color: #ffab40;
+}
+
+.sky-escort-garage-seat .primary {
+  background: linear-gradient(90deg, #ff7043, #ffab40);
+  border-color: transparent;
+  color: #1a1008;
+  font-weight: 700;
+}
+
+.sky-escort-garage-seat .primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* Threat radar — corner scope with live blips */
 .sky-escort-radar {
   position: absolute;

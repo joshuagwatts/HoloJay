@@ -321,23 +321,82 @@ type Bullet = {
   /** Player turret shot vs dive-ship plasma */
   friendly: boolean;
   speed: number;
+  dmg: number;
+  life: number;
+  tint: string;
+  scale: number;
 };
 type Blast = { id: number; x: number; y: number; z: number; age: number };
 
-/** Lowkey upgrade / booster scaffolding — expand later without rewriting the loop. */
-type UpgradeId = "boost" | "armor" | "radar" | "turret" | "shield" | "twin" | "paint" | "body";
+/** Combat upgrades only — paint / body / vehicle live in the garage. */
+type UpgradeId = "boost" | "armor" | "radar" | "turret" | "shield" | "twin";
+type VehicleId = "hauler" | "buggy" | "wagon";
+type TurretId = "mg" | "shotgun" | "laser";
 type BodyStyle = "stock" | "widebody" | "ratrod" | "spoiler";
 type PaintKit = { id: string; label: string; primary: string; emissive: string };
 
 const PAINT_KITS: PaintKit[] = [
-  { id: "stock", label: "Factory rust", primary: "", emissive: "" }, // falls back to portal color
+  { id: "stock", label: "Factory rust", primary: "", emissive: "" },
   { id: "neon", label: "Neon drift", primary: "#00e5ff", emissive: "#00bcd4" },
   { id: "venom", label: "Venom wrap", primary: "#76ff03", emissive: "#64dd17" },
   { id: "magma", label: "Magma flake", primary: "#ff1744", emissive: "#ff5252" },
   { id: "bone", label: "Bone chrome", primary: "#eceff1", emissive: "#90a4ae" },
+  { id: "midnight", label: "Midnight oil", primary: "#263238", emissive: "#546e7a" },
+  { id: "sand", label: "Sandstorm", primary: "#ffb74d", emissive: "#ff8f00" },
 ];
 
 const BODY_STYLES: BodyStyle[] = ["stock", "widebody", "ratrod", "spoiler"];
+
+const VEHICLES: { id: VehicleId; label: string; blurb: string }[] = [
+  { id: "hauler", label: "Hauler", blurb: "Classic open-bed truck — balanced and familiar" },
+  { id: "buggy", label: "Dune buggy", blurb: "Light cage buggy — snappy steer, big tires" },
+  { id: "wagon", label: "Long wagon", blurb: "Stretched flatbed — roomy turret deck" },
+];
+
+const TURRETS: { id: TurretId; label: string; blurb: string; color: string }[] = [
+  { id: "mg", label: "Auto MG", blurb: "Rapid-fire machine gun — hose the sky", color: "#ffab40" },
+  { id: "shotgun", label: "Scatter cannon", blurb: "Close-range pellet blast — chunky twin tubes", color: "#ff7043" },
+  { id: "laser", label: "Beam lance", blurb: "Hot cyan lances — slower, harder hits", color: "#40c4ff" },
+];
+
+type Garage = {
+  vehicle: VehicleId;
+  paintIdx: number;
+  kitIdx: number;
+  turret: TurretId;
+};
+
+const DEFAULT_GARAGE = (): Garage => ({
+  vehicle: "hauler",
+  paintIdx: 0,
+  kitIdx: 0,
+  turret: "mg",
+});
+
+const GARAGE_KEY = "holojay.skyGarage";
+
+function loadGarage(): Garage {
+  try {
+    const raw = localStorage.getItem(GARAGE_KEY);
+    if (!raw) return DEFAULT_GARAGE();
+    const parsed = JSON.parse(raw) as Partial<Garage>;
+    const vehicle = VEHICLES.some((v) => v.id === parsed.vehicle) ? (parsed.vehicle as VehicleId) : "hauler";
+    const turret = TURRETS.some((t) => t.id === parsed.turret) ? (parsed.turret as TurretId) : "mg";
+    const paintIdx = Math.max(0, Math.min(PAINT_KITS.length - 1, Number(parsed.paintIdx) || 0));
+    const kitIdx = Math.max(0, Math.min(BODY_STYLES.length - 1, Number(parsed.kitIdx) || 0));
+    return { vehicle, paintIdx, kitIdx, turret };
+  } catch {
+    return DEFAULT_GARAGE();
+  }
+}
+
+function saveGarage(g: Garage) {
+  try {
+    localStorage.setItem(GARAGE_KEY, JSON.stringify(g));
+  } catch {
+    /* ignore */
+  }
+}
 
 type Loadout = {
   boostCharges: number;
@@ -347,8 +406,6 @@ type Loadout = {
   turretRate: number;
   shieldCharges: number;
   twinGun: boolean;
-  paintIdx: number;
-  bodyIdx: number;
 };
 type Pickup = {
   id: number;
@@ -367,8 +424,6 @@ const DEFAULT_LOADOUT = (): Loadout => ({
   turretRate: 1,
   shieldCharges: 0,
   twinGun: false,
-  paintIdx: 0,
-  bodyIdx: 0,
 });
 
 const UPGRADE_LABEL: Record<UpgradeId, string> = {
@@ -378,8 +433,6 @@ const UPGRADE_LABEL: Record<UpgradeId, string> = {
   turret: "Turret feed",
   shield: "Bubble shield",
   twin: "Double barrel",
-  paint: "Paint booth",
-  body: "Body kit",
 };
 
 const UPGRADE_BLURB: Record<UpgradeId, string> = {
@@ -388,9 +441,7 @@ const UPGRADE_BLURB: Record<UpgradeId, string> = {
   radar: "HUD scope + sky pings on every rock & dive ship",
   turret: "Faster bed-gun fire rate",
   shield: "Absorb one hit in a glowing bubble",
-  twin: "Second barrel — fire two bolts at once",
-  paint: "Roll a fresh aftermarket wrap",
-  body: "Slap on a wild aftermarket body kit",
+  twin: "Second MG barrel — fire two bolts at once",
 };
 
 const UPGRADE_COLOR: Record<UpgradeId, string> = {
@@ -400,8 +451,6 @@ const UPGRADE_COLOR: Record<UpgradeId, string> = {
   turret: "#ffd54f",
   shield: "#80d8ff",
   twin: "#ffab40",
-  paint: "#e040fb",
-  body: "#ff6e40",
 };
 
 type Snap = {
@@ -429,6 +478,14 @@ type RoleMsg = {
   gunnerId: string | null;
   phase?: Phase;
   levelId?: string;
+};
+
+type GarageMsg = {
+  type: "garage";
+  vehicle?: VehicleId;
+  paintIdx?: number;
+  kitIdx?: number;
+  turret?: TurretId;
 };
 
 type InputMsg = {
@@ -576,6 +633,8 @@ export function SkyEscort({ color }: { color: string }) {
   const advancing = useRef(false);
   const loadout = useRef<Loadout>(DEFAULT_LOADOUT());
   const [loadoutHud, setLoadoutHud] = useState<Loadout>(DEFAULT_LOADOUT());
+  const garage = useRef<Garage>(loadGarage());
+  const [garageHud, setGarageHud] = useState<Garage>(() => loadGarage());
   const [radarBlips, setRadarBlips] = useState<RadarBlip[]>([]);
   const radarBlipsOn = useRef(false);
   const pickups = useRef<Pickup[]>([]);
@@ -762,8 +821,13 @@ export function SkyEscort({ color }: { color: string }) {
   }
 
   /** Bed-turret pivot — matches gunMount local pos on the open bed. */
+  function turretBack() {
+    const v = garage.current.vehicle;
+    return v === "wagon" ? 3.15 : v === "buggy" ? 1.85 : 2.45;
+  }
+
   function turretWorld() {
-    const back = 2.45;
+    const back = turretBack();
     const ox = Math.sin(yaw.current) * -back;
     const oz = Math.cos(yaw.current) * -back;
     return { x: x.current + ox, y: y.current + 1.65, z: z.current + oz };
@@ -991,22 +1055,48 @@ export function SkyEscort({ color }: { color: string }) {
       shieldPulse.current = 0.9;
     } else if (kind === "twin") {
       L.twinGun = true;
-    } else if (kind === "paint") {
-      L.paintIdx = (L.paintIdx + 1) % PAINT_KITS.length;
-    } else if (kind === "body") {
-      L.bodyIdx = (L.bodyIdx + 1) % BODY_STYLES.length;
     }
     setLoadoutHud({ ...L });
-    const tag =
-      kind === "paint"
-        ? `PAINT · ${PAINT_KITS[L.paintIdx]!.label.toUpperCase()}`
-        : kind === "body"
-          ? `BODY · ${BODY_STYLES[L.bodyIdx]!.toUpperCase()}`
-          : `UPGRADE · ${UPGRADE_LABEL[kind].toUpperCase()}`;
-    setClearBanner(tag);
+    setClearBanner(`UPGRADE · ${UPGRADE_LABEL[kind].toUpperCase()}`);
     clearBannerT.current = 1.8;
     playSfx("gate");
     shakeRef.current = Math.max(shakeRef.current, 0.4);
+  }
+
+  function patchGarage(patch: Partial<Garage>, broadcast = true) {
+    garage.current = { ...garage.current, ...patch };
+    setGarageHud({ ...garage.current });
+    saveGarage(garage.current);
+    if (broadcast) {
+      emitMinigame(instanceId, "sky-escort", {
+        type: "garage",
+        vehicle: garage.current.vehicle,
+        paintIdx: garage.current.paintIdx,
+        kitIdx: garage.current.kitIdx,
+        turret: garage.current.turret,
+      } satisfies GarageMsg);
+    }
+  }
+
+  function startRunFromGarage() {
+    if (!isHost && !solo) return;
+    const role = seatRef.current;
+    resetRun(role, levelIdxRef.current);
+    emitMinigame(instanceId, "sky-escort", {
+      type: "role",
+      driverId: role === "driver" ? selfId : "ai",
+      gunnerId:
+        role === "gunner" ? selfId : Object.values(players).find((pl) => pl.id !== selfId)?.id ?? "ai",
+      phase: "run",
+      levelId: activeLevel().id,
+    } satisfies RoleMsg);
+    emitMinigame(instanceId, "sky-escort", {
+      type: "garage",
+      vehicle: garage.current.vehicle,
+      paintIdx: garage.current.paintIdx,
+      kitIdx: garage.current.kitIdx,
+      turret: garage.current.turret,
+    } satisfies GarageMsg);
   }
 
   function tryBoost() {
@@ -1074,14 +1164,14 @@ export function SkyEscort({ color }: { color: string }) {
   function offerUpgrades() {
     if (phaseRef.current === "upgrade" && upgradeChoicesRef.current.length > 0) return;
     const L = loadout.current;
-    const all: UpgradeId[] = ["boost", "armor", "radar", "turret", "shield", "twin", "paint", "body"];
+    const all: UpgradeId[] = ["boost", "armor", "radar", "turret", "shield", "twin"];
     const pool = all.filter((k) => {
       if (k === "radar" && L.radar) return false;
       if (k === "armor" && L.armorBonus >= 2) return false;
       if (k === "turret" && L.turretRate >= 1.85) return false;
       if (k === "boost" && L.boostMax >= 3) return false;
       if (k === "shield" && L.shieldCharges >= 3) return false;
-      if (k === "twin" && L.twinGun) return false;
+      if (k === "twin" && (L.twinGun || garage.current.turret !== "mg")) return false;
       return true;
     });
     const bag = pool.length >= 2 ? [...pool] : [...all];
@@ -1371,6 +1461,125 @@ export function SkyEscort({ color }: { color: string }) {
       return;
     }
 
+    // Pre-run garage — vehicle/paint for driver, turret for gunner.
+    if (phase === "ready") {
+      const canVehicle = solo || isHost;
+      const canTurret = solo || !isHost;
+      const paint = PAINT_KITS[garageHud.paintIdx] ?? PAINT_KITS[0]!;
+      root.render(
+        <div className="sky-escort-garage" aria-live="polite">
+          <p className="sky-escort-garage-kicker">Sky Escort · Garage</p>
+          <h2 className="sky-escort-garage-title">CUSTOMIZE</h2>
+          <p className="sky-escort-garage-sub">
+            {solo
+              ? "Solo — kit the truck and the turret, then roll out"
+              : isHost
+                ? "Driver — pick the ride · gunner picks the turret"
+                : "Gunner — pick your turret · driver owns the ride"}
+          </p>
+
+          <div className="sky-escort-garage-cols">
+            <section className={`sky-escort-garage-panel${canVehicle ? "" : " locked"}`}>
+              <header>
+                <strong>Vehicle</strong>
+                <span>Driver</span>
+              </header>
+              <div className="sky-escort-garage-grid">
+                {VEHICLES.map((v) => (
+                  <button
+                    key={v.id}
+                    type="button"
+                    className={`sky-escort-garage-card${garageHud.vehicle === v.id ? " on" : ""}`}
+                    disabled={!canVehicle}
+                    onClick={() => patchGarage({ vehicle: v.id })}
+                  >
+                    <strong>{v.label}</strong>
+                    <em>{v.blurb}</em>
+                  </button>
+                ))}
+              </div>
+              <p className="sky-escort-garage-label">Paint wrap</p>
+              <div className="sky-escort-garage-swatches">
+                {PAINT_KITS.map((p, i) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    title={p.label}
+                    className={`sky-escort-garage-swatch${garageHud.paintIdx === i ? " on" : ""}`}
+                    style={{
+                      background: p.primary || color,
+                      boxShadow: garageHud.paintIdx === i ? `0 0 0 2px #f4ecdc, 0 0 12px ${p.emissive || color}` : undefined,
+                    }}
+                    disabled={!canVehicle}
+                    onClick={() => patchGarage({ paintIdx: i })}
+                  />
+                ))}
+              </div>
+              <p className="sky-escort-garage-paintname">{paint.label}</p>
+              <p className="sky-escort-garage-label">Body kit</p>
+              <div className="sky-escort-garage-grid kit">
+                {BODY_STYLES.map((kit, i) => (
+                  <button
+                    key={kit}
+                    type="button"
+                    className={`sky-escort-garage-card slim${garageHud.kitIdx === i ? " on" : ""}`}
+                    disabled={!canVehicle}
+                    onClick={() => patchGarage({ kitIdx: i })}
+                  >
+                    <strong>{kit}</strong>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className={`sky-escort-garage-panel${canTurret ? "" : " locked"}`}>
+              <header>
+                <strong>Turret</strong>
+                <span>Gunner</span>
+              </header>
+              <div className="sky-escort-garage-grid">
+                {TURRETS.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    className={`sky-escort-garage-card${garageHud.turret === t.id ? " on" : ""}`}
+                    style={{ ["--up-color" as string]: t.color }}
+                    disabled={!canTurret}
+                    onClick={() => patchGarage({ turret: t.id })}
+                  >
+                    <strong>{t.label}</strong>
+                    <em>{t.blurb}</em>
+                  </button>
+                ))}
+              </div>
+            </section>
+          </div>
+
+          <div className="sky-escort-garage-seat">
+            <button type="button" className={seat === "driver" ? "on" : ""} onClick={() => pickSeat("driver")}>
+              Driver
+            </button>
+            <button type="button" className={seat === "gunner" ? "on" : ""} onClick={() => pickSeat("gunner")}>
+              Gunner
+            </button>
+            <button
+              type="button"
+              className="primary"
+              disabled={!isHost && !solo}
+              onClick={() => startRunFromGarage()}
+            >
+              Roll out
+            </button>
+          </div>
+          <p className="sky-escort-garage-hint">
+            Level {levelIdx + 1} · {level.name} · Space starts · Tab swaps seat
+            {!solo && !isHost ? " · waiting on driver to roll out" : ""}
+          </p>
+        </div>,
+      );
+      return;
+    }
+
     // Between-level upgrade pick — must sit outside drei Html so clicks always work.
     if (phase === "upgrade") {
       root.render(
@@ -1422,6 +1631,9 @@ export function SkyEscort({ color }: { color: string }) {
               </span>
               <span>{score}</span>
               <span>{hudDist}m</span>
+              <span className="sky-escort-vitals-gun">
+                {TURRETS.find((t) => t.id === garageHud.turret)?.label ?? "Turret"}
+              </span>
               {clearBanner ? <span className="sky-escort-vitals-alert">{clearBanner}</span> : null}
               {failCue ? <span className="sky-escort-vitals-alert">IMPACT</span> : null}
             </div>
@@ -1452,6 +1664,10 @@ export function SkyEscort({ color }: { color: string }) {
     failCue,
     introLevel,
     radarBlips,
+    garageHud,
+    levelIdx,
+    level.name,
+    color,
   ]);
 
   useEffect(() => {
@@ -1537,16 +1753,7 @@ export function SkyEscort({ color }: { color: string }) {
         }
         if (e.code === "Space" || e.code === "Enter") {
           e.preventDefault();
-          if (!isHost) return;
-          const role = seatRef.current;
-          resetRun(role, levelIdxRef.current);
-          emitMinigame(instanceId, "sky-escort", {
-            type: "role",
-            driverId: role === "driver" ? selfId : "ai",
-            gunnerId: role === "gunner" ? selfId : Object.values(players).find((pl) => pl.id !== selfId)?.id ?? "ai",
-            phase: "run",
-            levelId: activeLevel().id,
-          } satisfies RoleMsg);
+          startRunFromGarage();
         }
         return;
       }
@@ -1651,7 +1858,7 @@ export function SkyEscort({ color }: { color: string }) {
   useEffect(() => {
     return onMinigame((msg) => {
       if (msg.instanceId !== instanceId || msg.gameId !== "sky-escort") return;
-      const data = msg.payload as RoleMsg | InputMsg | Snap;
+      const data = msg.payload as RoleMsg | InputMsg | Snap | GarageMsg;
       if (!data || typeof data !== "object" || !("type" in data)) return;
 
       if (data.type === "role") {
@@ -1705,6 +1912,22 @@ export function SkyEscort({ color }: { color: string }) {
         }
       }
       if (data.type === "input" && isHost) remoteInput.current = data;
+      if (data.type === "garage") {
+        const patch: Partial<Garage> = {};
+        if (data.vehicle && VEHICLES.some((v) => v.id === data.vehicle)) patch.vehicle = data.vehicle;
+        if (typeof data.paintIdx === "number") {
+          patch.paintIdx = Math.max(0, Math.min(PAINT_KITS.length - 1, data.paintIdx));
+        }
+        if (typeof data.kitIdx === "number") {
+          patch.kitIdx = Math.max(0, Math.min(BODY_STYLES.length - 1, data.kitIdx));
+        }
+        if (data.turret && TURRETS.some((t) => t.id === data.turret)) patch.turret = data.turret;
+        if (Object.keys(patch).length) {
+          garage.current = { ...garage.current, ...patch };
+          setGarageHud({ ...garage.current });
+          saveGarage(garage.current);
+        }
+      }
       if (data.type === "snap" && !isHost) {
         if (data.levelId) {
           setLevel(levelIndexFromId(data.levelId));
@@ -2031,6 +2254,10 @@ export function SkyEscort({ color }: { color: string }) {
           dz: dz / len,
           friendly: true,
           speed: 72,
+          dmg: 1,
+          life: 1.4,
+          tint: "#ffe082",
+          scale: 1,
         });
         fireCd.current = 0.34;
         playSfx("fire");
@@ -2057,25 +2284,77 @@ export function SkyEscort({ color }: { color: string }) {
           const aimX = sy * cp;
           const aimY = sp;
           const aimZ = cy * cp;
-          // Perpendicular offset for twin barrels
           const rx = cy;
           const rz = -sy;
-          const offsets = loadout.current.twinGun ? [-0.28, 0.28] : [0];
-          for (const o of offsets) {
+          const turret = garage.current.turret;
+          const rate = Math.max(0.85, loadout.current.turretRate);
+          if (turret === "shotgun") {
+            for (let i = 0; i < 6; i++) {
+              const spread = 0.11;
+              const jx = (Math.random() - 0.5) * spread;
+              const jy = (Math.random() - 0.5) * spread;
+              const jz = (Math.random() - 0.5) * spread;
+              let dx = aimX + jx;
+              let dy = aimY + jy;
+              let dz = aimZ + jz;
+              const len = Math.hypot(dx, dy, dz) || 1;
+              bullets.current.push({
+                id: nextId.current++,
+                x: tip.x + rx * ((i % 2) * 0.16 - 0.08),
+                y: tip.y,
+                z: tip.z + rz * ((i % 2) * 0.16 - 0.08),
+                dx: dx / len,
+                dy: dy / len,
+                dz: dz / len,
+                friendly: true,
+                speed: 54 + Math.random() * 8,
+                dmg: 1,
+                life: 0.48,
+                tint: "#ffcc80",
+                scale: 0.85,
+              });
+            }
+            fireCd.current = 0.52 / Math.sqrt(rate);
+          } else if (turret === "laser") {
             bullets.current.push({
               id: nextId.current++,
-              x: tip.x + rx * o,
+              x: tip.x,
               y: tip.y,
-              z: tip.z + rz * o,
+              z: tip.z,
               dx: aimX,
               dy: aimY,
               dz: aimZ,
               friendly: true,
-              speed: 78,
+              speed: 135,
+              dmg: 2,
+              life: 1.35,
+              tint: "#80d8ff",
+              scale: 1.55,
             });
+            fireCd.current = 0.3 / rate;
+          } else {
+            const offsets =
+              loadout.current.twinGun ? [-0.28, 0.28] : [0];
+            for (const o of offsets) {
+              bullets.current.push({
+                id: nextId.current++,
+                x: tip.x + rx * o,
+                y: tip.y,
+                z: tip.z + rz * o,
+                dx: aimX,
+                dy: aimY,
+                dz: aimZ,
+                friendly: true,
+                speed: 82,
+                dmg: 1,
+                life: 1.15,
+                tint: "#ffe082",
+                scale: 1,
+              });
+            }
+            fireCd.current = 0.09 / rate;
           }
-          fireCd.current = 0.11 / Math.max(0.85, loadout.current.turretRate);
-          shakeRef.current = Math.max(shakeRef.current, 0.18);
+          shakeRef.current = Math.max(shakeRef.current, turret === "shotgun" ? 0.32 : 0.18);
           playSfx("fire");
         }
       }
@@ -2103,6 +2382,8 @@ export function SkyEscort({ color }: { color: string }) {
         b.x += b.dx * spd * clamped;
         b.y += b.dy * spd * clamped;
         b.z += b.dz * spd * clamped;
+        b.life = (b.life ?? 2) - clamped;
+        if (b.life <= 0) b.z = 9999;
         // Hostile plasma vs the truck
         if (!b.friendly) {
           if (Math.hypot(b.x - x.current, b.y - (y.current + 1.1), b.z - z.current) < 1.85) {
@@ -2195,6 +2476,10 @@ export function SkyEscort({ color }: { color: string }) {
             dz: dz / len,
             friendly: false,
             speed: 38 + Math.min(14, levelIdxRef.current),
+            dmg: 1,
+            life: 2.2,
+            tint: "#ff4081",
+            scale: 1.35,
           });
           a.fireCd = Math.max(0.75, 1.45 - levelIdxRef.current * 0.04) + Math.random() * 0.55;
           playSfx("fire");
@@ -2203,7 +2488,7 @@ export function SkyEscort({ color }: { color: string }) {
         for (const b of bullets.current) {
           if (!b.friendly) continue;
           if (Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) < 1.75) {
-            a.hp -= 1;
+            a.hp -= b.dmg ?? 1;
             b.z = 9999;
             addBlast(a.x, a.y, a.z);
             flashHit();
@@ -2406,8 +2691,8 @@ export function SkyEscort({ color }: { color: string }) {
         mesh.visible = true;
         mesh.position.set(b.x, b.y, b.z);
         const mat = mesh.material as THREE.MeshBasicMaterial;
-        mat.color.set(b.friendly ? "#ffe082" : "#ff4081");
-        mesh.scale.setScalar(b.friendly ? 1 : 1.35);
+        mat.color.set(b.tint || (b.friendly ? "#ffe082" : "#ff4081"));
+        mesh.scale.setScalar(b.scale || (b.friendly ? 1 : 1.35));
       },
       () => new THREE.Mesh(new THREE.SphereGeometry(0.12, 6, 6), mats.bullet.clone()),
     );
@@ -2583,11 +2868,18 @@ export function SkyEscort({ color }: { color: string }) {
     }
   });
 
-  const paintKit = PAINT_KITS[loadoutHud.paintIdx] ?? PAINT_KITS[0]!;
+  const paintKit = PAINT_KITS[garageHud.paintIdx] ?? PAINT_KITS[0]!;
   const bodyPaint = paintKit.primary || color;
   const bodyGlow = paintKit.emissive || color;
-  const bodyStyle = BODY_STYLES[loadoutHud.bodyIdx] ?? "stock";
+  const bodyStyle = BODY_STYLES[garageHud.kitIdx] ?? "stock";
+  const vehicle = garageHud.vehicle;
+  const turretKind = garageHud.turret;
   const showShield = loadoutHud.shieldCharges > 0;
+  const wide = bodyStyle === "widebody" || vehicle === "wagon";
+  const chassisW = vehicle === "buggy" ? 2.15 : wide ? 3.15 : 2.7;
+  const chassisL = vehicle === "wagon" ? 6.8 : vehicle === "buggy" ? 4.4 : 5.6;
+  const bedZ = vehicle === "wagon" ? -1.55 : vehicle === "buggy" ? -0.85 : -1.15;
+  const turretZ = vehicle === "wagon" ? -3.15 : vehicle === "buggy" ? -1.85 : -2.45;
 
   return (
     <group>
@@ -2701,67 +2993,83 @@ export function SkyEscort({ color }: { color: string }) {
       </group>
 
       <group ref={buggy} position={[0, 0.85, level.startZ]} rotation={[0, Math.PI, 0]}>
-        {/* Pickup truck: short low cab forward, open bed, ring turret aft */}
-        {/* chassis rail */}
-        <mesh position={[0, 0.32, -0.15]} castShadow>
-          <boxGeometry args={bodyStyle === "widebody" ? [3.15, 0.42, 5.6] : [2.7, 0.42, 5.6]} />
+        {/* Chassis — hauler / buggy / wagon procedural stand-ins until custom models land */}
+        <mesh position={[0, 0.32, vehicle === "wagon" ? -0.35 : -0.15]} castShadow>
+          <boxGeometry args={[chassisW, 0.42, chassisL]} />
           <meshStandardMaterial color="#1c1612" metalness={0.45} roughness={0.55} />
         </mesh>
-        {/* Cab/hood on layer 1 — gunner camera only sees layer 0 so they never fill the frame */}
         <group ref={bindCabHide}>
-          <mesh position={[0, 0.78, 1.55]} castShadow>
-            <boxGeometry args={[bodyStyle === "widebody" ? 2.7 : 2.35, 0.55, 1.55]} />
-            <meshStandardMaterial color="#2a211a" metalness={0.4} roughness={0.5} />
-          </mesh>
-          <mesh position={[0, 1.15, 1.45]} castShadow>
-            <boxGeometry args={[bodyStyle === "widebody" ? 2.4 : 2.05, 0.55, 1.15]} />
-            <meshStandardMaterial color={bodyPaint} emissive={bodyGlow} emissiveIntensity={0.85} />
-          </mesh>
-          <mesh position={[0, 1.45, 1.4]}>
-            <boxGeometry args={[1.85, 0.1, 1.0]} />
-            <meshStandardMaterial color="#100c09" metalness={0.65} roughness={0.35} />
-          </mesh>
-          <mesh position={[0, 1.55, 1.85]}>
-            <boxGeometry args={[1.9, 0.08, 0.12]} />
-            <meshStandardMaterial color="#4e342e" metalness={0.5} />
-          </mesh>
-          <mesh position={[0, 1.05, 0.35]}>
-            <boxGeometry args={[2.2, 0.85, 0.14]} />
-            <meshStandardMaterial color="#241c16" metalness={0.45} />
-          </mesh>
+          {vehicle === "buggy" ? (
+            <>
+              <mesh position={[0, 1.15, 0.85]} castShadow>
+                <torusGeometry args={[0.95, 0.07, 8, 18]} />
+                <meshStandardMaterial color={bodyPaint} emissive={bodyGlow} emissiveIntensity={0.55} metalness={0.5} />
+              </mesh>
+              <mesh position={[0, 0.7, 0.95]} castShadow>
+                <boxGeometry args={[1.6, 0.35, 1.1]} />
+                <meshStandardMaterial color={bodyPaint} emissive={bodyGlow} emissiveIntensity={0.7} />
+              </mesh>
+              <mesh position={[-0.7, 1.05, 0.55]}>
+                <cylinderGeometry args={[0.05, 0.05, 1.1, 6]} />
+                <meshStandardMaterial color="#90a4ae" metalness={0.8} />
+              </mesh>
+              <mesh position={[0.7, 1.05, 0.55]}>
+                <cylinderGeometry args={[0.05, 0.05, 1.1, 6]} />
+                <meshStandardMaterial color="#90a4ae" metalness={0.8} />
+              </mesh>
+            </>
+          ) : (
+            <>
+              <mesh position={[0, 0.78, vehicle === "wagon" ? 1.85 : 1.55]} castShadow>
+                <boxGeometry args={[wide ? 2.7 : 2.35, 0.55, vehicle === "wagon" ? 1.85 : 1.55]} />
+                <meshStandardMaterial color="#2a211a" metalness={0.4} roughness={0.5} />
+              </mesh>
+              <mesh position={[0, 1.15, vehicle === "wagon" ? 1.75 : 1.45]} castShadow>
+                <boxGeometry args={[wide ? 2.4 : 2.05, vehicle === "wagon" ? 0.7 : 0.55, vehicle === "wagon" ? 1.35 : 1.15]} />
+                <meshStandardMaterial color={bodyPaint} emissive={bodyGlow} emissiveIntensity={0.85} />
+              </mesh>
+              <mesh position={[0, vehicle === "wagon" ? 1.6 : 1.45, vehicle === "wagon" ? 1.7 : 1.4]}>
+                <boxGeometry args={[1.85, 0.1, 1.0]} />
+                <meshStandardMaterial color="#100c09" metalness={0.65} roughness={0.35} />
+              </mesh>
+            </>
+          )}
           {bodyStyle === "ratrod" && (
-            <mesh position={[0, 1.05, 2.35]} castShadow>
+            <mesh position={[0, 1.05, vehicle === "buggy" ? 1.85 : 2.35]} castShadow>
               <boxGeometry args={[1.1, 0.55, 0.9]} />
               <meshStandardMaterial color="#78909c" metalness={0.85} roughness={0.25} emissive="#455a64" emissiveIntensity={0.35} />
             </mesh>
           )}
           {bodyStyle === "spoiler" && (
-            <mesh position={[0, 1.85, 1.05]} castShadow>
+            <mesh position={[0, vehicle === "buggy" ? 1.55 : 1.85, vehicle === "buggy" ? 0.35 : 1.05]} castShadow>
               <boxGeometry args={[1.6, 0.12, 0.55]} />
               <meshStandardMaterial color={bodyPaint} emissive={bodyGlow} emissiveIntensity={0.5} metalness={0.4} />
             </mesh>
           )}
         </group>
-        {/* open truck bed */}
-        <mesh position={[0, 0.62, -1.15]} castShadow>
-          <boxGeometry args={[bodyStyle === "widebody" ? 2.85 : 2.45, 0.16, 2.85]} />
+        {/* open deck / bed */}
+        <mesh position={[0, 0.62, bedZ]} castShadow>
+          <boxGeometry args={[wide ? 2.85 : vehicle === "buggy" ? 2.05 : 2.45, 0.16, vehicle === "wagon" ? 3.6 : vehicle === "buggy" ? 2.1 : 2.85]} />
           <meshStandardMaterial color="#1a1410" metalness={0.55} roughness={0.6} />
         </mesh>
-        {/* bed side rails — low, don't block gunner */}
-        <mesh position={[bodyStyle === "widebody" ? -1.35 : -1.15, 0.95, -1.15]}>
-          <boxGeometry args={[0.12, bodyStyle === "widebody" ? 0.7 : 0.55, 2.7]} />
-          <meshStandardMaterial color="#3e2723" metalness={0.5} />
-        </mesh>
-        <mesh position={[bodyStyle === "widebody" ? 1.35 : 1.15, 0.95, -1.15]}>
-          <boxGeometry args={[0.12, bodyStyle === "widebody" ? 0.7 : 0.55, 2.7]} />
-          <meshStandardMaterial color="#3e2723" metalness={0.5} />
-        </mesh>
-        <mesh position={[0, 0.95, -2.5]}>
-          <boxGeometry args={[bodyStyle === "widebody" ? 2.8 : 2.4, 0.5, 0.12]} />
-          <meshStandardMaterial color="#3e2723" metalness={0.5} />
-        </mesh>
+        {vehicle !== "buggy" && (
+          <>
+            <mesh position={[wide ? -1.35 : -1.15, 0.95, bedZ]}>
+              <boxGeometry args={[0.12, wide ? 0.7 : 0.55, vehicle === "wagon" ? 3.4 : 2.7]} />
+              <meshStandardMaterial color="#3e2723" metalness={0.5} />
+            </mesh>
+            <mesh position={[wide ? 1.35 : 1.15, 0.95, bedZ]}>
+              <boxGeometry args={[0.12, wide ? 0.7 : 0.55, vehicle === "wagon" ? 3.4 : 2.7]} />
+              <meshStandardMaterial color="#3e2723" metalness={0.5} />
+            </mesh>
+            <mesh position={[0, 0.95, turretZ - 0.05]}>
+              <boxGeometry args={[wide ? 2.8 : 2.4, 0.5, 0.12]} />
+              <meshStandardMaterial color="#3e2723" metalness={0.5} />
+            </mesh>
+          </>
+        )}
         {bodyStyle === "spoiler" && (
-          <mesh position={[0, 1.55, -2.55]} castShadow>
+          <mesh position={[0, 1.55, turretZ - 0.1]} castShadow>
             <boxGeometry args={[2.2, 0.1, 0.55]} />
             <meshStandardMaterial color={bodyPaint} emissive={bodyGlow} emissiveIntensity={0.55} metalness={0.45} />
           </mesh>
@@ -2769,33 +3077,39 @@ export function SkyEscort({ color }: { color: string }) {
         {bodyStyle === "widebody" && (
           <>
             <mesh position={[-1.55, 0.55, 0.2]}>
-              <boxGeometry args={[0.35, 0.35, 3.8]} />
+              <boxGeometry args={[0.35, 0.35, chassisL * 0.7]} />
               <meshStandardMaterial color={bodyPaint} emissive={bodyGlow} emissiveIntensity={0.35} />
             </mesh>
             <mesh position={[1.55, 0.55, 0.2]}>
-              <boxGeometry args={[0.35, 0.35, 3.8]} />
+              <boxGeometry args={[0.35, 0.35, chassisL * 0.7]} />
               <meshStandardMaterial color={bodyPaint} emissive={bodyGlow} emissiveIntensity={0.35} />
             </mesh>
           </>
         )}
         {[
-          [-1.35, 0.12, 1.75],
-          [1.35, 0.12, 1.75],
-          [-1.35, 0.12, -1.85],
-          [1.35, 0.12, -1.85],
+          [-chassisW * 0.5, 0.12, chassisL * 0.32],
+          [chassisW * 0.5, 0.12, chassisL * 0.32],
+          [-chassisW * 0.5, 0.12, -chassisL * 0.33],
+          [chassisW * 0.5, 0.12, -chassisL * 0.33],
         ].map((p, i) => (
           <mesh key={i} position={p as [number, number, number]} rotation={[0, 0, Math.PI / 2]} castShadow>
-            <cylinderGeometry args={[bodyStyle === "widebody" ? 0.68 : 0.58, bodyStyle === "widebody" ? 0.68 : 0.58, 0.45, 14]} />
+            <cylinderGeometry
+              args={[
+                vehicle === "buggy" || wide ? 0.72 : 0.58,
+                vehicle === "buggy" || wide ? 0.72 : 0.58,
+                vehicle === "buggy" ? 0.55 : 0.45,
+                14,
+              ]}
+            />
             <meshStandardMaterial color="#0e0a08" roughness={0.95} />
           </mesh>
         ))}
-        <mesh position={[0, 0.55, 2.35]}>
+        <mesh position={[0, 0.55, chassisL * 0.42]}>
           <sphereGeometry args={[0.28, 12, 12]} />
           <meshStandardMaterial color={bodyPaint} emissive={bodyGlow} emissiveIntensity={2.6} />
         </mesh>
-        <pointLight position={[0, 1.1, 2.1]} color={bodyGlow} intensity={11} distance={15} />
+        <pointLight position={[0, 1.1, chassisL * 0.38]} color={bodyGlow} intensity={11} distance={15} />
 
-        {/* Bubble shield — visible when charges remain or after a soak */}
         {showShield && (
           <mesh position={[0, 1.1, -0.2]}>
             <sphereGeometry args={[3.1, 24, 16]} />
@@ -2812,12 +3126,12 @@ export function SkyEscort({ color }: { color: string }) {
           </mesh>
         )}
 
-        {/* bed ring + turret — pivot matches turretWorld (y≈1.65, z≈-2.45) */}
-        <mesh position={[0, 0.78, -2.45]} rotation={[-Math.PI / 2, 0, 0]}>
+        {/* bed ring + turret — distinct silhouettes per kit */}
+        <mesh position={[0, 0.78, turretZ]} rotation={[-Math.PI / 2, 0, 0]}>
           <ringGeometry args={[0.7, 1.05, 24]} />
           <meshStandardMaterial color="#5d4037" metalness={0.7} roughness={0.35} side={THREE.DoubleSide} />
         </mesh>
-        <group ref={gunMount} position={[0, 1.65, -2.45]}>
+        <group ref={gunMount} position={[0, 1.65, turretZ]}>
           <mesh position={[0, -0.2, 0]}>
             <cylinderGeometry args={[0.48, 0.55, 0.35, 16]} />
             <meshStandardMaterial color="#3e2723" metalness={0.6} roughness={0.4} />
@@ -2831,45 +3145,87 @@ export function SkyEscort({ color }: { color: string }) {
             <meshStandardMaterial color="#1b1511" roughness={0.85} />
           </mesh>
           <group ref={gunPitchMount}>
-            <mesh position={[0, 0.12, 0.28]}>
-              <boxGeometry args={[0.95, 0.42, 0.08]} />
-              <meshStandardMaterial color="#4e342e" metalness={0.55} roughness={0.45} />
-            </mesh>
-            <mesh position={[0, 0.08, 0.5]}>
-              <boxGeometry args={[loadoutHud.twinGun ? 0.55 : 0.32, 0.26, 0.55]} />
-              <meshStandardMaterial color="#efebe9" metalness={0.8} roughness={0.25} />
-            </mesh>
-            {/* Primary barrel */}
-            <mesh position={[loadoutHud.twinGun ? -0.22 : 0, 0.06, 1.35]} rotation={[Math.PI / 2, 0, 0]}>
-              <cylinderGeometry args={[0.08, 0.11, 1.7, 10]} />
-              <meshStandardMaterial color="#d7ccc8" metalness={0.85} roughness={0.2} />
-            </mesh>
-            <mesh position={[loadoutHud.twinGun ? -0.22 : 0, 0.06, 2.2]} rotation={[Math.PI / 2, 0, 0]}>
-              <cylinderGeometry args={[0.13, 0.1, 0.2, 8]} />
-              <meshStandardMaterial color="#ffab40" emissive="#ff6d00" emissiveIntensity={0.9} metalness={0.6} />
-            </mesh>
-            {/* Twin barrel — visibly bolted on */}
-            {loadoutHud.twinGun && (
+            {turretKind === "shotgun" ? (
               <>
-                <mesh position={[0.22, 0.06, 1.35]} rotation={[Math.PI / 2, 0, 0]}>
+                <mesh position={[0, 0.1, 0.35]}>
+                  <boxGeometry args={[0.85, 0.38, 0.7]} />
+                  <meshStandardMaterial color="#5d4037" metalness={0.55} roughness={0.4} />
+                </mesh>
+                <mesh position={[-0.2, 0.08, 1.05]} rotation={[Math.PI / 2, 0, 0]}>
+                  <cylinderGeometry args={[0.16, 0.18, 1.15, 10]} />
+                  <meshStandardMaterial color="#bcaaa4" metalness={0.7} roughness={0.3} />
+                </mesh>
+                <mesh position={[0.2, 0.08, 1.05]} rotation={[Math.PI / 2, 0, 0]}>
+                  <cylinderGeometry args={[0.16, 0.18, 1.15, 10]} />
+                  <meshStandardMaterial color="#bcaaa4" metalness={0.7} roughness={0.3} />
+                </mesh>
+                <mesh position={[-0.2, 0.08, 1.65]} rotation={[Math.PI / 2, 0, 0]}>
+                  <cylinderGeometry args={[0.22, 0.17, 0.22, 8]} />
+                  <meshStandardMaterial color="#ff7043" emissive="#ff6d00" emissiveIntensity={1.1} />
+                </mesh>
+                <mesh position={[0.2, 0.08, 1.65]} rotation={[Math.PI / 2, 0, 0]}>
+                  <cylinderGeometry args={[0.22, 0.17, 0.22, 8]} />
+                  <meshStandardMaterial color="#ff7043" emissive="#ff6d00" emissiveIntensity={1.1} />
+                </mesh>
+                <pointLight position={[0, 0.15, 1.0]} color="#ff7043" intensity={4} distance={7} />
+              </>
+            ) : turretKind === "laser" ? (
+              <>
+                <mesh position={[0, 0.12, 0.4]}>
+                  <boxGeometry args={[0.42, 0.28, 0.9]} />
+                  <meshStandardMaterial color="#263238" metalness={0.75} roughness={0.25} />
+                </mesh>
+                <mesh position={[0, 0.12, 0.15]}>
+                  <octahedronGeometry args={[0.28, 0]} />
+                  <meshStandardMaterial color="#80d8ff" emissive="#40c4ff" emissiveIntensity={1.8} />
+                </mesh>
+                <mesh position={[0, 0.12, 1.55]} rotation={[Math.PI / 2, 0, 0]}>
+                  <cylinderGeometry args={[0.06, 0.09, 2.4, 10]} />
+                  <meshStandardMaterial color="#eceff1" metalness={0.9} roughness={0.15} emissive="#40c4ff" emissiveIntensity={0.45} />
+                </mesh>
+                <mesh position={[0, 0.12, 2.7]} rotation={[Math.PI / 2, 0, 0]}>
+                  <torusGeometry args={[0.18, 0.04, 8, 16]} />
+                  <meshStandardMaterial color="#40c4ff" emissive="#00e5ff" emissiveIntensity={1.6} />
+                </mesh>
+                <pointLight position={[0, 0.2, 1.2]} color="#40c4ff" intensity={5.5} distance={9} />
+              </>
+            ) : (
+              <>
+                <mesh position={[0, 0.12, 0.28]}>
+                  <boxGeometry args={[0.95, 0.42, 0.08]} />
+                  <meshStandardMaterial color="#4e342e" metalness={0.55} roughness={0.45} />
+                </mesh>
+                <mesh position={[0, 0.08, 0.5]}>
+                  <boxGeometry args={[loadoutHud.twinGun ? 0.55 : 0.32, 0.26, 0.55]} />
+                  <meshStandardMaterial color="#efebe9" metalness={0.8} roughness={0.25} />
+                </mesh>
+                <mesh position={[0, 0.22, 0.35]}>
+                  <boxGeometry args={[0.35, 0.22, 0.45]} />
+                  <meshStandardMaterial color="#6d4c41" metalness={0.4} />
+                </mesh>
+                <mesh position={[loadoutHud.twinGun ? -0.22 : 0, 0.06, 1.35]} rotation={[Math.PI / 2, 0, 0]}>
                   <cylinderGeometry args={[0.08, 0.11, 1.7, 10]} />
                   <meshStandardMaterial color="#d7ccc8" metalness={0.85} roughness={0.2} />
                 </mesh>
-                <mesh position={[0.22, 0.06, 2.2]} rotation={[Math.PI / 2, 0, 0]}>
+                <mesh position={[loadoutHud.twinGun ? -0.22 : 0, 0.06, 2.2]} rotation={[Math.PI / 2, 0, 0]}>
                   <cylinderGeometry args={[0.13, 0.1, 0.2, 8]} />
                   <meshStandardMaterial color="#ffab40" emissive="#ff6d00" emissiveIntensity={0.9} metalness={0.6} />
                 </mesh>
+                {loadoutHud.twinGun && (
+                  <>
+                    <mesh position={[0.22, 0.06, 1.35]} rotation={[Math.PI / 2, 0, 0]}>
+                      <cylinderGeometry args={[0.08, 0.11, 1.7, 10]} />
+                      <meshStandardMaterial color="#d7ccc8" metalness={0.85} roughness={0.2} />
+                    </mesh>
+                    <mesh position={[0.22, 0.06, 2.2]} rotation={[Math.PI / 2, 0, 0]}>
+                      <cylinderGeometry args={[0.13, 0.1, 0.2, 8]} />
+                      <meshStandardMaterial color="#ffab40" emissive="#ff6d00" emissiveIntensity={0.9} metalness={0.6} />
+                    </mesh>
+                  </>
+                )}
+                <pointLight position={[0, 0.15, 1.0]} color="#ffab40" intensity={3.5} distance={7} />
               </>
             )}
-            <mesh position={[-0.32, -0.08, 0.12]} rotation={[0.4, 0, 0.2]}>
-              <cylinderGeometry args={[0.045, 0.045, 0.4, 6]} />
-              <meshStandardMaterial color="#3e2723" />
-            </mesh>
-            <mesh position={[0.32, -0.08, 0.12]} rotation={[0.4, 0, -0.2]}>
-              <cylinderGeometry args={[0.045, 0.045, 0.4, 6]} />
-              <meshStandardMaterial color="#3e2723" />
-            </mesh>
-            <pointLight position={[0, 0.15, 1.0]} color="#ffab40" intensity={3.5} distance={7} />
           </group>
         </group>
       </group>
@@ -2909,6 +3265,7 @@ export function SkyEscort({ color }: { color: string }) {
                 phase === "intro" ||
                 phase === "dead" ||
                 phase === "upgrade" ||
+                phase === "ready" ||
                 paused ||
                 (phase === "run" && seat === "gunner")
                   ? "hidden"
@@ -2917,48 +3274,6 @@ export function SkyEscort({ color }: { color: string }) {
           >
             <em>{level.name}</em>
             <strong>Sky Escort</strong>
-            {phase === "ready" && (
-              <>
-                <p>
-                  You’re the <b>{seat === "driver" ? "DRIVER" : "GUNNER"}</b>
-                </p>
-                <p className="sky-escort-hint">
-                  {seat === "driver"
-                    ? "Carve the winding road — bridge, corkscrew, upgrade pads — Shift-boost to the gate"
-                    : "Free-look turret — mouse aims the sky, crosshair on dive-bombers"}
-                </p>
-                <div className="sky-escort-actions">
-                  <button type="button" className={seat === "driver" ? "on" : ""} onClick={() => pickSeat("driver")}>
-                    Driver
-                  </button>
-                  <button type="button" className={seat === "gunner" ? "on" : ""} onClick={() => pickSeat("gunner")}>
-                    Gunner
-                  </button>
-                  <button
-                    type="button"
-                    className="primary"
-                    onClick={() => {
-                      if (!isHost) return;
-                      const role = seatRef.current;
-                      resetRun(role, levelIdxRef.current);
-                      emitMinigame(instanceId, "sky-escort", {
-                        type: "role",
-                        driverId: role === "driver" ? selfId : "ai",
-                        gunnerId:
-                          role === "gunner" ? selfId : Object.values(players).find((pl) => pl.id !== selfId)?.id ?? "ai",
-                        phase: "run",
-                        levelId: activeLevel().id,
-                      } satisfies RoleMsg);
-                    }}
-                  >
-                    Roll out
-                  </button>
-                </div>
-                <p className="sky-escort-hint">
-                  Level {levelIdx + 1} · endless · Esc pauses · Space starts · Tab swaps seat
-                </p>
-              </>
-            )}
             {phase === "run" && (
               <>
                 <div className="sky-escort-loadout" aria-label="Loadout">
@@ -2968,18 +3283,17 @@ export function SkyEscort({ color }: { color: string }) {
                   <span className={loadoutHud.armorBonus > 0 ? "on" : ""}>ARMOR {loadoutHud.armorBonus}</span>
                   <span className={loadoutHud.radar ? "on" : ""}>RADAR</span>
                   <span className={loadoutHud.turretRate > 1 ? "on" : ""}>
-                    TURRET ×{loadoutHud.turretRate.toFixed(2)}
+                    FEED ×{loadoutHud.turretRate.toFixed(2)}
                   </span>
                   <span className={loadoutHud.shieldCharges > 0 ? "on" : ""}>
                     SHIELD {loadoutHud.shieldCharges}
                   </span>
                   <span className={loadoutHud.twinGun ? "on" : ""}>TWIN</span>
-                  <span className={loadoutHud.paintIdx > 0 ? "on" : ""}>
-                    {PAINT_KITS[loadoutHud.paintIdx]?.label ?? "Paint"}
+                  <span className="on">
+                    {VEHICLES.find((v) => v.id === garageHud.vehicle)?.label ?? "Hauler"}
                   </span>
-                  <span className={loadoutHud.bodyIdx > 0 ? "on" : ""}>
-                    {BODY_STYLES[loadoutHud.bodyIdx] ?? "stock"}
-                  </span>
+                  <span className="on">{PAINT_KITS[garageHud.paintIdx]?.label ?? "Paint"}</span>
+                  <span className="on">{TURRETS.find((t) => t.id === garageHud.turret)?.label ?? "MG"}</span>
                 </div>
                 <p>
                   {seat === "driver" ? "DRIVER" : "GUNNER"} · {score} pts · hull {"♥".repeat(hull)}
