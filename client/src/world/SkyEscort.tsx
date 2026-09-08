@@ -1068,64 +1068,73 @@ export function SkyEscort({ color }: { color: string }) {
     };
   }, [fpGunMats]);
 
-  // Gunner HUD lives in a separate React root on document.body — NEVER as an R3F child
-  // (createPortal inside <group> crashes with "Div is not part of the THREE namespace").
+  // Overlay HUD on document.body — NEVER as an R3F child (createPortal under <group> crashes).
   const gunHudRoot = useRef<Root | null>(null);
-  const gunHudHost = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const host = document.createElement("div");
-    host.id = "sky-escort-gun-hud-root";
+    host.id = "sky-escort-hud-root";
     document.body.appendChild(host);
-    gunHudHost.current = host;
     gunHudRoot.current = createRoot(host);
     return () => {
       gunHudRoot.current?.unmount();
       gunHudRoot.current = null;
       host.remove();
-      gunHudHost.current = null;
     };
   }, []);
 
   useEffect(() => {
     const root = gunHudRoot.current;
     if (!root) return;
-    if (phase === "run" && seat === "gunner") {
+
+    // Between-level upgrade pick — must sit outside drei Html so clicks always work.
+    if (phase === "upgrade") {
       root.render(
-        <div className={`sky-escort-gun-overlay${hitFlash ? " hit" : ""}`} aria-hidden>
-          <svg className="sky-escort-tron" viewBox="0 0 200 160" preserveAspectRatio="xMidYMax meet">
-            {/* open reticle */}
-            <g className="sky-escort-tron-reticle">
-              <circle cx="100" cy="48" r="7" />
-              <line x1="100" y1="34" x2="100" y2="40" />
-              <line x1="100" y1="56" x2="100" y2="62" />
-              <line x1="86" y1="48" x2="92" y2="48" />
-              <line x1="108" y1="48" x2="114" y2="48" />
-            </g>
-            {/* perspective barrel rails */}
-            <g className="sky-escort-tron-barrel">
-              <path d="M92 58 L86 148" />
-              <path d="M108 58 L114 148" />
-              <path d="M95 72 L105 72" />
-              <path d="M93 98 L107 98" />
-              <path d="M90 124 L110 124" />
-              <circle className="sky-escort-tron-muzzle" cx="100" cy="56" r="3.2" />
-            </g>
-            {/* cheek brackets */}
-            <g className="sky-escort-tron-cheek">
-              <path d="M54 118 L72 108 L72 152" />
-              <path d="M146 118 L128 108 L128 152" />
-              <path d="M54 152 L72 152" />
-              <path d="M146 152 L128 152" />
-            </g>
-            {/* receiver baseline */}
-            <path className="sky-escort-tron-receiver" d="M78 148 L122 148" />
-          </svg>
+        <div className="sky-escort-upgrade" aria-live="polite">
+          <p className="sky-escort-upgrade-kicker">Gate cleared</p>
+          <h2 className="sky-escort-upgrade-title">PICK AN UPGRADE</h2>
+          <p className="sky-escort-upgrade-sub">
+            Level {introNextRef.current + 1} · {makeLevel(introNextRef.current).name}
+          </p>
+          <div className="sky-escort-upgrade-grid">
+            {upgradeChoices.map((kind, i) => (
+              <button
+                key={`${kind}-${i}`}
+                type="button"
+                className="sky-escort-upgrade-card"
+                style={{ ["--up-color" as string]: UPGRADE_COLOR[kind] }}
+                onClick={() => chooseUpgrade(kind)}
+                disabled={!isHost && !solo}
+              >
+                <span className="sky-escort-upgrade-key">{i + 1}</span>
+                <strong>{UPGRADE_LABEL[kind]}</strong>
+                <em>{UPGRADE_BLURB[kind]}</em>
+              </button>
+            ))}
+          </div>
+          <p className="sky-escort-upgrade-hint">
+            {isHost || solo ? "Click a card or press 1 / 2 / 3" : "Waiting for host to pick…"}
+          </p>
         </div>,
       );
-    } else {
-      root.render(null);
+      return;
     }
-  }, [phase, seat, hitFlash]);
+
+    // Gunner crosshair only — no 2D gun silhouette.
+    if (phase === "run" && seat === "gunner") {
+      root.render(
+        <div className="sky-escort-gun-overlay" aria-hidden>
+          <div className={`sky-escort-crosshair${hitFlash ? " hit" : ""}`}>
+            <span className="sky-escort-crosshair-ring" />
+            <span className="sky-escort-crosshair-h" />
+            <span className="sky-escort-crosshair-v" />
+          </div>
+        </div>,
+      );
+      return;
+    }
+
+    root.render(null);
+  }, [phase, seat, hitFlash, upgradeChoices, isHost, solo]);
 
   useEffect(() => {
     document.exitPointerLock?.();
@@ -2228,7 +2237,7 @@ export function SkyEscort({ color }: { color: string }) {
       <Html
         fullscreen
         zIndexRange={[100, 0]}
-        style={{ pointerEvents: phase === "ready" || phase === "upgrade" || paused ? "auto" : "none" }}
+        style={{ pointerEvents: phase === "ready" || paused ? "auto" : "none" }}
       >
         <div className="sky-escort-hud">
           {phase === "intro" && introLevel && (
@@ -2243,34 +2252,6 @@ export function SkyEscort({ color }: { color: string }) {
               <div className="sky-escort-intro-bar">
                 <span />
               </div>
-            </div>
-          )}
-          {phase === "upgrade" && (
-            <div className="sky-escort-upgrade" aria-live="polite">
-              <p className="sky-escort-upgrade-kicker">Gate cleared</p>
-              <h2 className="sky-escort-upgrade-title">PICK AN UPGRADE</h2>
-              <p className="sky-escort-upgrade-sub">
-                Level {introNextRef.current + 1} · {makeLevel(introNextRef.current).name}
-              </p>
-              <div className="sky-escort-upgrade-grid">
-                {upgradeChoices.map((kind, i) => (
-                  <button
-                    key={`${kind}-${i}`}
-                    type="button"
-                    className="sky-escort-upgrade-card"
-                    style={{ ["--up-color" as string]: UPGRADE_COLOR[kind] }}
-                    onClick={() => chooseUpgrade(kind)}
-                    disabled={!isHost && !solo}
-                  >
-                    <span className="sky-escort-upgrade-key">{i + 1}</span>
-                    <strong>{UPGRADE_LABEL[kind]}</strong>
-                    <em>{UPGRADE_BLURB[kind]}</em>
-                  </button>
-                ))}
-              </div>
-              <p className="sky-escort-upgrade-hint">
-                {isHost || solo ? "Click a card or press 1 / 2 / 3" : "Waiting for host to pick…"}
-              </p>
             </div>
           )}
           {paused && phase === "run" && (

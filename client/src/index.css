@@ -981,64 +981,12 @@ kbd {
   box-shadow: 0 0 14px rgba(255, 213, 79, 0.95);
 }
 
-/* Minimal Tron gunner overlay (document.body root — not inside drei Html) */
+/* Gunner crosshair host (document.body) — no 2D gun silhouette */
 .sky-escort-gun-overlay {
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 40;
-}
-
-.sky-escort-tron {
-  position: absolute;
-  left: 50%;
-  bottom: 0;
-  width: min(420px, 58vw);
-  height: min(38vh, 300px);
-  translate: -50% 0;
-  overflow: visible;
-}
-
-.sky-escort-tron path,
-.sky-escort-tron line,
-.sky-escort-tron circle {
-  fill: none;
-  stroke: rgba(126, 249, 255, 0.72);
-  stroke-width: 1.15;
-  stroke-linecap: square;
-  stroke-linejoin: miter;
-  vector-effect: non-scaling-stroke;
-  filter: drop-shadow(0 0 4px rgba(0, 229, 255, 0.45));
-}
-
-.sky-escort-tron-reticle circle,
-.sky-escort-tron-reticle line {
-  stroke: rgba(255, 224, 130, 0.85);
-  stroke-width: 1.25;
-  filter: drop-shadow(0 0 5px rgba(255, 171, 64, 0.55));
-}
-
-.sky-escort-tron-muzzle {
-  stroke: rgba(255, 171, 64, 0.95);
-  stroke-width: 1.4;
-  filter: drop-shadow(0 0 6px rgba(255, 145, 0, 0.7));
-}
-
-.sky-escort-tron-cheek path {
-  stroke: rgba(255, 171, 64, 0.55);
-  stroke-width: 1.05;
-}
-
-.sky-escort-tron-receiver {
-  stroke: rgba(126, 249, 255, 0.5);
-  stroke-width: 1;
-}
-
-.sky-escort-gun-overlay.hit .sky-escort-tron-reticle circle,
-.sky-escort-gun-overlay.hit .sky-escort-tron-reticle line,
-.sky-escort-gun-overlay.hit .sky-escort-tron-muzzle {
-  stroke: #fff8e1;
-  filter: drop-shadow(0 0 8px rgba(255, 236, 179, 0.95));
 }
 
 .sky-escort-pause,
@@ -1053,6 +1001,11 @@ kbd {
   background: rgba(8, 4, 2, 0.78);
   color: #f4ecdc;
   pointer-events: auto;
+}
+
+.sky-escort-upgrade {
+  /* Body-mounted between levels — must beat canvas / HUD for clicks */
+  z-index: 10050;
 }
 
 .sky-escort-pause-kicker,
