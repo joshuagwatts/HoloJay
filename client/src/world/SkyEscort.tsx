@@ -438,7 +438,7 @@ export function SkyEscort({ color }: { color: string }) {
   const buggy = useRef<THREE.Group>(null);
   const gunMount = useRef<THREE.Group>(null);
   const gunPitchMount = useRef<THREE.Group>(null);
-  /** First-person gun hardware locked to camera — always fills the gunner FOV. */
+  /** First-person gun viewmodel — scene-synced to camera each frame (not camera-parented). */
   const fpGun = useRef<THREE.Group | null>(null);
   const gunPivotWorld = useRef(new THREE.Vector3());
   const gunQuatWorld = useRef(new THREE.Quaternion());
