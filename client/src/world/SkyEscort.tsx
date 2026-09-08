@@ -1,7 +1,7 @@
 import { Html } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { createRoot, type Root } from "react-dom/client";
 import * as THREE from "three";
 import { emitMinigame, onMinigame } from "../net/session.ts";
 import { useGame } from "../state/store.ts";
@@ -1020,6 +1020,50 @@ export function SkyEscort({ color }: { color: string }) {
       Object.values(fpGunMats).forEach((m) => m.dispose());
     };
   }, [fpGunMats]);
+
+  // Gunner HUD lives in a separate React root on document.body — NEVER as an R3F child
+  // (createPortal inside <group> crashes with "Div is not part of the THREE namespace").
+  const gunHudRoot = useRef<Root | null>(null);
+  const gunHudHost = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const host = document.createElement("div");
+    host.id = "sky-escort-gun-hud-root";
+    document.body.appendChild(host);
+    gunHudHost.current = host;
+    gunHudRoot.current = createRoot(host);
+    return () => {
+      gunHudRoot.current?.unmount();
+      gunHudRoot.current = null;
+      host.remove();
+      gunHudHost.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const root = gunHudRoot.current;
+    if (!root) return;
+    if (phase === "run" && seat === "gunner") {
+      root.render(
+        <div className="sky-escort-gun-overlay" aria-hidden>
+          <div className={`sky-escort-crosshair${hitFlash ? " hit" : ""}`}>
+            <span className="sky-escort-crosshair-ring" />
+            <span className="sky-escort-crosshair-h" />
+            <span className="sky-escort-crosshair-v" />
+          </div>
+          <div className="sky-escort-viewmodel">
+            <div className="sky-escort-viewmodel-cheek left" />
+            <div className="sky-escort-viewmodel-cheek right" />
+            <div className="sky-escort-viewmodel-receiver" />
+            <div className="sky-escort-viewmodel-barrel" />
+            <div className="sky-escort-viewmodel-muzzle" />
+            <div className="sky-escort-viewmodel-bead" />
+          </div>
+        </div>,
+      );
+    } else {
+      root.render(null);
+    }
+  }, [phase, seat, hitFlash]);
 
   useEffect(() => {
     document.exitPointerLock?.();
@@ -2269,27 +2313,6 @@ export function SkyEscort({ color }: { color: string }) {
           </div>
         </div>
       </Html>
-      {typeof document !== "undefined" &&
-        phase === "run" &&
-        seat === "gunner" &&
-        createPortal(
-          <div className="sky-escort-gun-overlay" aria-hidden>
-            <div className={`sky-escort-crosshair${hitFlash ? " hit" : ""}`}>
-              <span className="sky-escort-crosshair-ring" />
-              <span className="sky-escort-crosshair-h" />
-              <span className="sky-escort-crosshair-v" />
-            </div>
-            <div className="sky-escort-viewmodel">
-              <div className="sky-escort-viewmodel-cheek left" />
-              <div className="sky-escort-viewmodel-cheek right" />
-              <div className="sky-escort-viewmodel-receiver" />
-              <div className="sky-escort-viewmodel-barrel" />
-              <div className="sky-escort-viewmodel-muzzle" />
-              <div className="sky-escort-viewmodel-bead" />
-            </div>
-          </div>,
-          document.body,
-        )}
     </group>
   );
 }
