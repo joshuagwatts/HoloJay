@@ -1002,15 +1002,62 @@ export function SkyEscort({ color }: { color: string }) {
     setPhaseBoth("run");
   }
 
-  // Viewmodel materials stay unlit + fog-immune so the barrel cannot wash out.
+  // Viewmodel: thin Tron wireframe (unlit) so it never washes out or fights the world turret.
   const fpGunMats = useMemo(
     () => ({
-      steel: new THREE.MeshBasicMaterial({ color: "#e8eef2", fog: false, depthTest: false, depthWrite: false }),
-      receiver: new THREE.MeshBasicMaterial({ color: "#90a4ae", fog: false, depthTest: false, depthWrite: false }),
-      cheek: new THREE.MeshBasicMaterial({ color: "#6d4c41", fog: false, depthTest: false, depthWrite: false }),
-      grip: new THREE.MeshBasicMaterial({ color: "#3e2723", fog: false, depthTest: false, depthWrite: false }),
-      muzzle: new THREE.MeshBasicMaterial({ color: "#ffab40", fog: false, depthTest: false, depthWrite: false }),
-      bead: new THREE.MeshBasicMaterial({ color: "#ffe082", fog: false, depthTest: false, depthWrite: false }),
+      steel: new THREE.MeshBasicMaterial({
+        color: "#7ef9ff",
+        fog: false,
+        depthTest: false,
+        depthWrite: false,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.55,
+      }),
+      receiver: new THREE.MeshBasicMaterial({
+        color: "#7ef9ff",
+        fog: false,
+        depthTest: false,
+        depthWrite: false,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.4,
+      }),
+      cheek: new THREE.MeshBasicMaterial({
+        color: "#ffab40",
+        fog: false,
+        depthTest: false,
+        depthWrite: false,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.45,
+      }),
+      grip: new THREE.MeshBasicMaterial({
+        color: "#7ef9ff",
+        fog: false,
+        depthTest: false,
+        depthWrite: false,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.35,
+      }),
+      muzzle: new THREE.MeshBasicMaterial({
+        color: "#ffab40",
+        fog: false,
+        depthTest: false,
+        depthWrite: false,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.7,
+      }),
+      bead: new THREE.MeshBasicMaterial({
+        color: "#ffe082",
+        fog: false,
+        depthTest: false,
+        depthWrite: false,
+        transparent: true,
+        opacity: 0.9,
+      }),
     }),
     [],
   );
@@ -1044,20 +1091,35 @@ export function SkyEscort({ color }: { color: string }) {
     if (!root) return;
     if (phase === "run" && seat === "gunner") {
       root.render(
-        <div className="sky-escort-gun-overlay" aria-hidden>
-          <div className={`sky-escort-crosshair${hitFlash ? " hit" : ""}`}>
-            <span className="sky-escort-crosshair-ring" />
-            <span className="sky-escort-crosshair-h" />
-            <span className="sky-escort-crosshair-v" />
-          </div>
-          <div className="sky-escort-viewmodel">
-            <div className="sky-escort-viewmodel-cheek left" />
-            <div className="sky-escort-viewmodel-cheek right" />
-            <div className="sky-escort-viewmodel-receiver" />
-            <div className="sky-escort-viewmodel-barrel" />
-            <div className="sky-escort-viewmodel-muzzle" />
-            <div className="sky-escort-viewmodel-bead" />
-          </div>
+        <div className={`sky-escort-gun-overlay${hitFlash ? " hit" : ""}`} aria-hidden>
+          <svg className="sky-escort-tron" viewBox="0 0 200 160" preserveAspectRatio="xMidYMax meet">
+            {/* open reticle */}
+            <g className="sky-escort-tron-reticle">
+              <circle cx="100" cy="48" r="7" />
+              <line x1="100" y1="34" x2="100" y2="40" />
+              <line x1="100" y1="56" x2="100" y2="62" />
+              <line x1="86" y1="48" x2="92" y2="48" />
+              <line x1="108" y1="48" x2="114" y2="48" />
+            </g>
+            {/* perspective barrel rails */}
+            <g className="sky-escort-tron-barrel">
+              <path d="M92 58 L86 148" />
+              <path d="M108 58 L114 148" />
+              <path d="M95 72 L105 72" />
+              <path d="M93 98 L107 98" />
+              <path d="M90 124 L110 124" />
+              <circle className="sky-escort-tron-muzzle" cx="100" cy="56" r="3.2" />
+            </g>
+            {/* cheek brackets */}
+            <g className="sky-escort-tron-cheek">
+              <path d="M54 118 L72 108 L72 152" />
+              <path d="M146 118 L128 108 L128 152" />
+              <path d="M54 152 L72 152" />
+              <path d="M146 152 L128 152" />
+            </g>
+            {/* receiver baseline */}
+            <path className="sky-escort-tron-receiver" d="M78 148 L122 148" />
+          </svg>
         </div>,
       );
     } else {
