@@ -3233,7 +3233,7 @@ export function SkyEscort({ color }: { color: string }) {
       <Html
         fullscreen
         zIndexRange={[100, 0]}
-        style={{ pointerEvents: phase === "ready" || paused ? "auto" : "none" }}
+        style={{ pointerEvents: paused ? "auto" : "none" }}
       >
         <div className="sky-escort-hud">
           {paused && phase === "run" && (
