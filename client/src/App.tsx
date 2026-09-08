@@ -58,14 +58,31 @@ export function App() {
   }, []);
 
   // Solo deep link: `?enter=sky-escort` (optional `&skyRadar=1` / `&skyIntro=1` for QA).
+  // Persist into sessionStorage so guest auth / hub boot can't eat the query before Sky Escort mounts.
   useEffect(() => {
-    if (!user || !hubReady) return;
     try {
       const params = new URLSearchParams(window.location.search);
       const enter = params.get("enter");
+      if (enter && gameById(enter)) sessionStorage.setItem("holojay.enter", enter);
+      if (params.get("skyRadar") === "1") sessionStorage.setItem("holojay.skyRadar", "1");
+      if (params.get("skyIntro") === "1") sessionStorage.setItem("holojay.skyIntro", "1");
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!user || !hubReady) return;
+    try {
+      const enter = sessionStorage.getItem("holojay.enter");
       if (!enter || !gameById(enter)) return;
-      if (useGame.getState().location.type === "game") return;
+      if (useGame.getState().location.type === "game") {
+        sessionStorage.removeItem("holojay.enter");
+        return;
+      }
       emitEnterDirect(enter);
+      sessionStorage.removeItem("holojay.enter");
+      const params = new URLSearchParams(window.location.search);
       params.delete("enter");
       const next = `${window.location.pathname}${params.toString() ? `?${params}` : ""}${window.location.hash}`;
       window.history.replaceState({}, "", next);

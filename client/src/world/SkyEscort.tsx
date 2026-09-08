@@ -588,7 +588,11 @@ export function SkyEscort({ color }: { color: string }) {
   const skyQa = useMemo(() => {
     try {
       const p = new URLSearchParams(window.location.search);
-      return { radar: p.get("skyRadar") === "1", intro: p.get("skyIntro") === "1" };
+      const radar = p.get("skyRadar") === "1" || sessionStorage.getItem("holojay.skyRadar") === "1";
+      const intro = p.get("skyIntro") === "1" || sessionStorage.getItem("holojay.skyIntro") === "1";
+      if (radar) sessionStorage.removeItem("holojay.skyRadar");
+      if (intro) sessionStorage.removeItem("holojay.skyIntro");
+      return { radar, intro };
     } catch {
       return { radar: false, intro: false };
     }
@@ -1142,8 +1146,8 @@ export function SkyEscort({ color }: { color: string }) {
     fireHeld.current = false;
     lookQ.current.x = 0;
     lookQ.current.y = 0;
-    introT.current = 3.2;
-    introSkipLock.current = 1.0;
+    introT.current = skyQa.intro ? 12 : 3.2;
+    introSkipLock.current = skyQa.intro ? 0.2 : 1.0;
     introNextRef.current = next;
     setIntroLevel({ idx: next, name: nextL.name });
     addScore(hullRef.current * 50 + 200, `GATE +${hullRef.current * 50 + 200}`);
@@ -1207,6 +1211,7 @@ export function SkyEscort({ color }: { color: string }) {
         setScore(0);
         killStreak.current = 0;
         loadout.current = DEFAULT_LOADOUT();
+        if (skyQa.radar) loadout.current.radar = true;
         setLoadoutHud({ ...loadout.current });
       }
     }
