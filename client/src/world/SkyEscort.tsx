@@ -43,7 +43,7 @@ function makeLevel(n: number): LevelDef {
     startZ: 24 + Math.min(soft, 10) * 1.4,
     // Longer early runs so the fight has room to breathe (~12–16s L0).
     endZ: -(110 + soft * 30),
-    halfW: 38 + Math.min(soft, 14) * 1.8,
+    halfW: 46 + Math.min(soft, 14) * 2.1,
     tile: 5,
     hull: 3 + (soft >= 6 ? 1 : 0) + (soft >= 14 ? 1 : 0),
     driveSpeed: 19 + Math.min(soft, 16) * 0.55,
@@ -101,26 +101,26 @@ function levelIndexFromId(id: string | undefined): number {
 type Crater = { id: number; x: number; z: number; r: number; depth: number };
 type PathPoint = { t: number; x: number; z: number; y: number; yaw: number };
 
-const ROAD_HALF = 6.6;
+const ROAD_HALF = 8.2;
 
 function pathXZ(t: number, levelIdx: number, startZ: number, endZ: number): { x: number; z: number } {
   const span = Math.max(1, startZ - endZ);
   const tt = Math.min(1, Math.max(0, t));
   const seed = levelIdx * 2.17;
-  const amp = 13 + Math.min(levelIdx, 14) * 1.15;
+  const amp = 16 + Math.min(levelIdx, 14) * 1.45;
   const z = startZ - tt * span;
   let x =
-    Math.sin(tt * Math.PI * 1.85 + seed) * amp * 0.62 +
-    Math.sin(tt * Math.PI * 3.6 + seed * 1.4) * amp * 0.28;
+    Math.sin(tt * Math.PI * 1.85 + seed) * amp * 0.68 +
+    Math.sin(tt * Math.PI * 3.6 + seed * 1.4) * amp * 0.34;
   // Corkscrew / helix mid-route
   if (tt > 0.3 && tt < 0.58) {
     const u = (tt - 0.3) / 0.28;
-    x += Math.sin(u * Math.PI * 2.6 + seed) * (11 + Math.min(levelIdx, 10) * 0.35);
+    x += Math.sin(u * Math.PI * 2.6 + seed) * (14 + Math.min(levelIdx, 10) * 0.45);
   }
   // Late S-bend into the gate
   if (tt > 0.72) {
     const u = (tt - 0.72) / 0.28;
-    x += Math.sin(u * Math.PI) * (amp * 0.35) * (levelIdx % 2 === 0 ? 1 : -1);
+    x += Math.sin(u * Math.PI) * (amp * 0.42) * (levelIdx % 2 === 0 ? 1 : -1);
   }
   return { x, z };
 }
@@ -222,10 +222,10 @@ function groundY(
   const { dist, pt } = nearestOnPath(x, z, startZ, endZ, levelIdx);
   let h: number;
   if (dist <= ROAD_HALF) {
-    h = pt.y - (dist / ROAD_HALF) ** 2 * 0.28;
-  } else if (dist < ROAD_HALF + 5.5) {
-    const u = (dist - ROAD_HALF) / 5.5;
-    h = pt.y - u * u * 8.5 - 0.4;
+    h = pt.y - (dist / ROAD_HALF) ** 2 * 0.22;
+  } else if (dist < ROAD_HALF + 7.2) {
+    const u = (dist - ROAD_HALF) / 7.2;
+    h = pt.y - u * u * 4.2 - 0.35;
   } else {
     h = pt.y - 10 - (dist - ROAD_HALF) * 0.4;
   }
@@ -240,7 +240,59 @@ type Role = "driver" | "gunner";
 type Phase = "ready" | "run" | "intro" | "upgrade" | "won" | "dead";
 
 type Meteor = { id: number; x: number; y: number; z: number; vx: number; vy: number; vz: number };
-type Alien = { id: number; x: number; y: number; z: number; hp: number };
+type AlienMode = "dive" | "strafe" | "bank" | "flank" | "feint";
+type Alien = {
+  id: number;
+  x: number;
+  y: number;
+  z: number;
+  hp: number;
+  mode: AlienMode;
+  age: number;
+  side: number;
+  phase: number;
+  holdY: number;
+};
+
+function pickAlienMode(levelIdx: number): AlienMode {
+  const r = Math.random();
+  if (levelIdx < 2) return r < 0.55 ? "dive" : "strafe";
+  if (levelIdx < 5) {
+    if (r < 0.3) return "dive";
+    if (r < 0.55) return "strafe";
+    if (r < 0.78) return "flank";
+    return "bank";
+  }
+  if (r < 0.22) return "dive";
+  if (r < 0.42) return "strafe";
+  if (r < 0.62) return "flank";
+  if (r < 0.82) return "bank";
+  return "feint";
+}
+
+function makeAlien(
+  id: number,
+  x: number,
+  y: number,
+  z: number,
+  hp: number,
+  levelIdx: number,
+): Alien {
+  const mode = pickAlienMode(levelIdx);
+  const side = Math.random() < 0.5 ? -1 : 1;
+  return {
+    id,
+    x: mode === "flank" ? x + side * (10 + Math.random() * 8) : x,
+    y: mode === "bank" ? y + 3 + Math.random() * 3 : y,
+    z,
+    hp,
+    mode,
+    age: 0,
+    side,
+    phase: Math.random() * Math.PI * 2,
+    holdY: y + (mode === "bank" ? 4 + Math.random() * 3 : 2),
+  };
+}
 type Bullet = { id: number; x: number; y: number; z: number; dx: number; dy: number; dz: number };
 type Blast = { id: number; x: number; y: number; z: number; age: number };
 
@@ -985,13 +1037,16 @@ export function SkyEscort({ color }: { color: string }) {
     const seedN = 2 + Math.min(2, Math.floor(nextLevelIdx / 4));
     for (let i = 0; i < seedN; i++) {
       const pt = pathPoint(0.08 + i * 0.07, nextLevelIdx, L.startZ, L.endZ);
-      aliens.current.push({
-        id: nextId.current++,
-        x: pt.x + (Math.random() - 0.5) * 8,
-        y: pt.y + 5 + Math.random() * 4,
-        z: pt.z,
-        hp: nextLevelIdx < 3 ? 1 : 2,
-      });
+      aliens.current.push(
+        makeAlien(
+          nextId.current++,
+          pt.x + (Math.random() - 0.5) * 8,
+          pt.y + 5 + Math.random() * 4,
+          pt.z,
+          nextLevelIdx < 3 ? 1 : 2,
+          nextLevelIdx,
+        ),
+      );
     }
     shakeRef.current = 0;
     failCueT.current = 0;
@@ -1119,7 +1174,7 @@ export function SkyEscort({ color }: { color: string }) {
       return;
     }
 
-    // Gunner crosshair only — no 2D gun silhouette.
+    // Gunner: crosshair + thin vitals only (no fat card / no 2D gun).
     if (phase === "run" && seat === "gunner") {
       root.render(
         <div className="sky-escort-gun-overlay" aria-hidden>
@@ -1128,13 +1183,23 @@ export function SkyEscort({ color }: { color: string }) {
             <span className="sky-escort-crosshair-h" />
             <span className="sky-escort-crosshair-v" />
           </div>
+          <div className="sky-escort-vitals">
+            <span>
+              {"♥".repeat(hull)}
+              {"♡".repeat(Math.max(0, activeLevel().hull + loadoutHud.armorBonus - hull))}
+            </span>
+            <span>{score}</span>
+            <span>{hudDist}m</span>
+            {clearBanner ? <span className="sky-escort-vitals-alert">{clearBanner}</span> : null}
+            {failCue ? <span className="sky-escort-vitals-alert">IMPACT</span> : null}
+          </div>
         </div>,
       );
       return;
     }
 
     root.render(null);
-  }, [phase, seat, hitFlash, upgradeChoices, isHost, solo]);
+  }, [phase, seat, hitFlash, upgradeChoices, isHost, solo, hull, score, hudDist, loadoutHud, clearBanner, failCue]);
 
   useEffect(() => {
     document.exitPointerLock?.();
@@ -1372,7 +1437,21 @@ export function SkyEscort({ color }: { color: string }) {
         craters.current = (data.craters ?? []).map((c) => ({ ...c }));
         groundDirty.current = true;
         meteors.current = data.meteors;
-        aliens.current = data.aliens;
+        aliens.current = data.aliens.map((raw) => {
+          const a = raw as Alien;
+          return {
+            id: a.id,
+            x: a.x,
+            y: a.y,
+            z: a.z,
+            hp: a.hp,
+            mode: a.mode ?? "dive",
+            age: a.age ?? 0,
+            side: a.side ?? 1,
+            phase: a.phase ?? 0,
+            holdY: a.holdY ?? a.y + 2,
+          };
+        });
         blasts.current = data.blasts;
         shakeRef.current = data.shake;
         driverIdRef.current = data.driverId;
@@ -1585,13 +1664,16 @@ export function SkyEscort({ color }: { color: string }) {
         const here = nearPath(x.current, z.current).pt.t;
         for (let i = 0; i < pack; i++) {
           const pt = pathAt(Math.min(0.98, here + 0.08 + Math.random() * 0.12 + i * 0.03));
-          aliens.current.push({
-            id: nextId.current++,
-            x: pt.x + (Math.random() - 0.5) * 10,
-            y: pt.y + 5 + Math.random() * 6,
-            z: pt.z,
-            hp: levelIdxRef.current < 3 ? 1 : levelIdxRef.current < 10 ? 2 : 3,
-          });
+          aliens.current.push(
+            makeAlien(
+              nextId.current++,
+              pt.x + (Math.random() - 0.5) * 12,
+              pt.y + 5 + Math.random() * 6,
+              pt.z,
+              levelIdxRef.current < 3 ? 1 : levelIdxRef.current < 10 ? 2 : 3,
+              levelIdxRef.current,
+            ),
+          );
         }
       }
 
@@ -1677,11 +1759,57 @@ export function SkyEscort({ color }: { color: string }) {
         b.z += b.dz * 72 * clamped;
       }
       for (const a of aliens.current) {
+        a.age += clamped;
         const dist = Math.hypot(a.x - x.current, a.z - z.current);
-        const diveMul = dist < 18 ? 1.55 : 1;
-        a.x += (x.current - a.x) * 0.38 * diveMul * clamped;
-        a.y += (1.6 - a.y) * 0.3 * diveMul * clamped;
-        a.z += (z.current - a.z) * 0.48 * diveMul * clamped + 6.5 * clamped;
+        const tx = x.current;
+        const ty = y.current + 1.55;
+        const tz = z.current;
+
+        if (a.mode === "strafe") {
+          a.x += Math.sin(a.age * 4.2 + a.phase) * a.side * 16 * clamped;
+          a.x += (tx - a.x) * 0.2 * clamped;
+          a.y += (ty + 2.8 + Math.sin(a.age * 2.4 + a.phase) * 1.2 - a.y) * 0.28 * clamped;
+          a.z += (tz - a.z) * 0.32 * clamped + 5.2 * clamped;
+          if (dist < 13) a.mode = "dive";
+        } else if (a.mode === "bank") {
+          if (a.age < 2.35) {
+            a.y += (a.holdY - a.y) * 0.45 * clamped;
+            a.x += Math.cos(a.age * 2.4 + a.phase) * a.side * 13 * clamped;
+            a.z += (tz + 20 - a.z) * 0.18 * clamped + 2.2 * clamped;
+          } else {
+            a.x += (tx - a.x) * 0.58 * clamped;
+            a.y += (ty - a.y) * 0.72 * clamped;
+            a.z += (tz - a.z) * 0.62 * clamped + 8.5 * clamped;
+          }
+        } else if (a.mode === "flank") {
+          const lateral = dist > 15 ? 15 : 2.5;
+          const flankX = tx + a.side * lateral;
+          a.x += (flankX - a.x) * 0.48 * clamped;
+          a.y += (ty + 1.4 + Math.sin(a.age * 3 + a.phase) * 0.6 - a.y) * 0.36 * clamped;
+          a.z += (tz - a.z) * 0.42 * clamped + 7.2 * clamped;
+          if (dist < 9) a.mode = "dive";
+        } else if (a.mode === "feint") {
+          if (a.age < 1.35) {
+            a.x += (tx - a.x) * 0.52 * clamped;
+            a.y += (ty + 0.4 - a.y) * 0.58 * clamped;
+            a.z += (tz - a.z) * 0.48 * clamped + 4 * clamped;
+          } else if (a.age < 2.15) {
+            a.y += 11 * clamped;
+            a.x += a.side * 11 * clamped;
+            a.z -= 3.5 * clamped;
+          } else {
+            a.x += (tx - a.x) * 0.62 * clamped;
+            a.y += (ty - a.y) * 0.68 * clamped;
+            a.z += (tz - a.z) * 0.72 * clamped + 9.2 * clamped;
+          }
+        } else {
+          // dive — commit hard
+          const diveMul = dist < 18 ? 1.65 : 1;
+          a.x += (tx - a.x) * 0.4 * diveMul * clamped;
+          a.y += (ty - a.y) * 0.34 * diveMul * clamped;
+          a.z += (tz - a.z) * 0.5 * diveMul * clamped + 7.2 * clamped;
+        }
+
         for (const b of bullets.current) {
           if (Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) < 1.75) {
             a.hp -= 1;
@@ -1824,16 +1952,25 @@ export function SkyEscort({ color }: { color: string }) {
       (a, mesh) => {
         mesh.visible = true;
         mesh.position.set(a.x, a.y, a.z);
-        mesh.rotation.y = performance.now() * 0.004 + a.id;
-        mesh.rotation.x = Math.sin(performance.now() * 0.006 + a.id) * 0.35;
-        const pulse = 1 + Math.sin(performance.now() * 0.01 + a.id) * 0.08;
-        mesh.scale.set(1.15 * pulse, 0.85 * pulse, 1.45 * pulse);
+        // Face the truck; bank by mode so strafers / flanks read differently.
+        mesh.lookAt(x.current, y.current + 1.2, z.current);
+        mesh.rotateX(a.mode === "bank" && a.age < 2.3 ? -0.55 : -0.25);
+        mesh.rotateZ(Math.sin(a.age * 3.2 + a.phase) * (a.mode === "strafe" ? 0.55 : 0.2) * a.side);
+        const pulse = 1 + Math.sin(performance.now() * 0.01 + a.id) * 0.06;
+        const stretch = a.mode === "dive" ? 1.55 : a.mode === "feint" ? 1.35 : 1.25;
+        mesh.scale.set(1.05 * pulse, 0.75 * pulse, stretch * pulse);
         const mat = mesh.material as THREE.MeshStandardMaterial;
         if (loadout.current.radar) {
           mat.emissiveIntensity = 2.4 + Math.sin(performance.now() * 0.02 + a.id) * 0.6;
           mat.emissive.set("#ffab40");
+        } else if (a.mode === "feint") {
+          mat.emissiveIntensity = 1.5;
+          mat.emissive.set("#ff80ab");
+        } else if (a.mode === "bank") {
+          mat.emissiveIntensity = 1.35;
+          mat.emissive.set("#b388ff");
         } else {
-          mat.emissiveIntensity = 1.1;
+          mat.emissiveIntensity = 1.15;
           mat.emissive.set("#00e5ff");
         }
       },
@@ -1972,17 +2109,13 @@ export function SkyEscort({ color }: { color: string }) {
         persp.near = 0.05;
         persp.updateProjectionMatrix();
       }
-      if (fpGun.current) {
-        // Place viewmodel in camera space (R3F group, depthTest off — always on top).
-        camera.updateMatrixWorld();
-        const offset = gunEyeLocal.current.set(0.08, -0.48, -0.62);
-        offset.applyQuaternion(camera.quaternion);
-        fpGun.current.visible = true;
-        fpGun.current.position.copy(camera.position).add(offset);
-        fpGun.current.quaternion.copy(camera.quaternion);
-        fpGun.current.rotateX(0.08);
-        fpGun.current.updateMatrixWorld(true);
+      if (fpGun.current) fpGun.current.visible = false;
+      if (persp.isPerspectiveCamera) {
+        persp.fov = THREE.MathUtils.damp(persp.fov, hitFlash ? 72 : 65, 10, clamped);
+        persp.near = 0.05;
+        persp.updateProjectionMatrix();
       }
+      // World turret + crosshair only — no FP viewmodel clutter.
     } else {
       camera.layers.mask = 0xffffffff;
       if (fpGun.current) fpGun.current.visible = false;
@@ -2278,7 +2411,16 @@ export function SkyEscort({ color }: { color: string }) {
           )}
           <div
             className="sky-escort-card"
-            style={{ visibility: phase === "intro" || phase === "dead" || phase === "upgrade" || paused ? "hidden" : "visible" }}
+            style={{
+              visibility:
+                phase === "intro" ||
+                phase === "dead" ||
+                phase === "upgrade" ||
+                paused ||
+                (phase === "run" && seat === "gunner")
+                  ? "hidden"
+                  : "visible",
+            }}
           >
             <em>{level.name}</em>
             <strong>Sky Escort</strong>

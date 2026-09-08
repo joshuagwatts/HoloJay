@@ -981,12 +981,33 @@ kbd {
   box-shadow: 0 0 14px rgba(255, 213, 79, 0.95);
 }
 
-/* Gunner crosshair host (document.body) — no 2D gun silhouette */
+/* Gunner clean HUD host (document.body) — crosshair + thin vitals */
 .sky-escort-gun-overlay {
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 40;
+}
+
+.sky-escort-vitals {
+  position: absolute;
+  left: 50%;
+  top: 10px;
+  translate: -50% 0;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  font-family: Syne, sans-serif;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: rgba(244, 236, 220, 0.82);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.65);
+}
+
+.sky-escort-vitals-alert {
+  color: #ffab40;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 
 .sky-escort-pause,
