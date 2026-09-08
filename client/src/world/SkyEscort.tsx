@@ -252,6 +252,7 @@ type Alien = {
   side: number;
   phase: number;
   holdY: number;
+  fireCd: number;
 };
 
 function pickAlienMode(levelIdx: number): AlienMode {
@@ -291,9 +292,21 @@ function makeAlien(
     side,
     phase: Math.random() * Math.PI * 2,
     holdY: y + (mode === "bank" ? 4 + Math.random() * 3 : 2),
+    fireCd: 0.6 + Math.random() * 1.1,
   };
 }
-type Bullet = { id: number; x: number; y: number; z: number; dx: number; dy: number; dz: number };
+type Bullet = {
+  id: number;
+  x: number;
+  y: number;
+  z: number;
+  dx: number;
+  dy: number;
+  dz: number;
+  /** Player turret shot vs dive-ship plasma */
+  friendly: boolean;
+  speed: number;
+};
 type Blast = { id: number; x: number; y: number; z: number; age: number };
 
 /** Lowkey upgrade / booster scaffolding — expand later without rewriting the loop. */
@@ -539,6 +552,7 @@ export function SkyEscort({ color }: { color: string }) {
       meteor: new THREE.MeshStandardMaterial({ color: "#5c4030", emissive: "#ff6a00", emissiveIntensity: 1.3 }),
       alien: new THREE.MeshStandardMaterial({ color: "#1b5e20", emissive: "#69f0ae", emissiveIntensity: 1.4 }),
       bullet: new THREE.MeshBasicMaterial({ color: "#ffe082" }),
+      enemyBullet: new THREE.MeshBasicMaterial({ color: "#ff4081" }),
       blast: new THREE.MeshBasicMaterial({ color: "#ff9100", transparent: true, opacity: 0.7 }),
     }),
     [color],
@@ -1033,15 +1047,15 @@ export function SkyEscort({ color }: { color: string }) {
     loadout.current.boostCharges = Math.min(loadout.current.boostMax, loadout.current.boostCharges + 1);
     setLoadoutHud({ ...loadout.current });
     buildTerrain();
-    // Seed dive ships so the first seconds aren't an empty commute.
+    // Seed dive ships further downrange so they approach from distance.
     const seedN = 2 + Math.min(2, Math.floor(nextLevelIdx / 4));
     for (let i = 0; i < seedN; i++) {
-      const pt = pathPoint(0.08 + i * 0.07, nextLevelIdx, L.startZ, L.endZ);
+      const pt = pathPoint(0.22 + i * 0.12, nextLevelIdx, L.startZ, L.endZ);
       aliens.current.push(
         makeAlien(
           nextId.current++,
-          pt.x + (Math.random() - 0.5) * 8,
-          pt.y + 5 + Math.random() * 4,
+          pt.x + (Math.random() - 0.5) * 14,
+          pt.y + 7 + Math.random() * 5,
           pt.z,
           nextLevelIdx < 3 ? 1 : 2,
           nextLevelIdx,
@@ -1450,6 +1464,7 @@ export function SkyEscort({ color }: { color: string }) {
             side: a.side ?? 1,
             phase: a.phase ?? 0,
             holdY: a.holdY ?? a.y + 2,
+            fireCd: a.fireCd ?? 0.8,
           };
         });
         blasts.current = data.blasts;
@@ -1659,16 +1674,16 @@ export function SkyEscort({ color }: { color: string }) {
       const alienEvery = Math.max(0.36, level.alienEvery - progress * 0.55);
       if (alienAcc.current >= alienEvery) {
         alienAcc.current = 0;
-        // Wave packs ahead along the winding route.
+        // Spawn further downrange — ships come in from deep sky / ahead of the ribbon.
         const pack = Math.random() < 0.35 + Math.min(0.35, levelIdxRef.current * 0.04) ? 2 : 1;
         const here = nearPath(x.current, z.current).pt.t;
         for (let i = 0; i < pack; i++) {
-          const pt = pathAt(Math.min(0.98, here + 0.08 + Math.random() * 0.12 + i * 0.03));
+          const pt = pathAt(Math.min(0.97, here + 0.24 + Math.random() * 0.22 + i * 0.05));
           aliens.current.push(
             makeAlien(
               nextId.current++,
-              pt.x + (Math.random() - 0.5) * 12,
-              pt.y + 5 + Math.random() * 6,
+              pt.x + (Math.random() - 0.5) * 16,
+              pt.y + 8 + Math.random() * 7,
               pt.z,
               levelIdxRef.current < 3 ? 1 : levelIdxRef.current < 10 ? 2 : 3,
               levelIdxRef.current,
@@ -1697,6 +1712,8 @@ export function SkyEscort({ color }: { color: string }) {
           dx: dx / len,
           dy: dy / len,
           dz: dz / len,
+          friendly: true,
+          speed: 72,
         });
         fireCd.current = 0.34;
         playSfx("fire");
@@ -1728,6 +1745,8 @@ export function SkyEscort({ color }: { color: string }) {
             dx: sy * cp,
             dy: sp,
             dz: cy * cp,
+            friendly: true,
+            speed: 78,
           });
           fireCd.current = 0.11 / Math.max(0.85, loadout.current.turretRate);
           shakeRef.current = Math.max(shakeRef.current, 0.18);
@@ -1754,12 +1773,23 @@ export function SkyEscort({ color }: { color: string }) {
       }
 
       for (const b of bullets.current) {
-        b.x += b.dx * 72 * clamped;
-        b.y += b.dy * 72 * clamped;
-        b.z += b.dz * 72 * clamped;
+        const spd = b.speed || 72;
+        b.x += b.dx * spd * clamped;
+        b.y += b.dy * spd * clamped;
+        b.z += b.dz * spd * clamped;
+        // Hostile plasma vs the truck
+        if (!b.friendly) {
+          if (Math.hypot(b.x - x.current, b.y - (y.current + 1.1), b.z - z.current) < 1.85) {
+            hurt(1);
+            addBlast(b.x, b.y, b.z);
+            playSfx("boom");
+            b.z = 9999;
+          }
+        }
       }
       for (const a of aliens.current) {
         a.age += clamped;
+        a.fireCd = Math.max(0, (a.fireCd ?? 0) - clamped);
         const dist = Math.hypot(a.x - x.current, a.z - z.current);
         const tx = x.current;
         const ty = y.current + 1.55;
@@ -1810,7 +1840,40 @@ export function SkyEscort({ color }: { color: string }) {
           a.z += (tz - a.z) * 0.5 * diveMul * clamped + 7.2 * clamped;
         }
 
+        // Dive ships open fire from range before they kamikaze.
+        if (
+          a.fireCd <= 0 &&
+          a.age > 0.45 &&
+          dist < 48 &&
+          dist > 9 &&
+          a.y > y.current + 1.8 &&
+          bullets.current.filter((b) => !b.friendly).length < 18
+        ) {
+          const lead = 0.35 + Math.random() * 0.25;
+          const aimX = tx + Math.sin(yaw.current) * speed.current * lead;
+          const aimY = ty + (Math.random() - 0.5) * 1.4;
+          const aimZ = tz + Math.cos(yaw.current) * speed.current * lead;
+          const dx = aimX - a.x + (Math.random() - 0.5) * 2.2;
+          const dy = aimY - a.y + (Math.random() - 0.5) * 1.1;
+          const dz = aimZ - a.z + (Math.random() - 0.5) * 2.2;
+          const len = Math.hypot(dx, dy, dz) || 1;
+          bullets.current.push({
+            id: nextId.current++,
+            x: a.x,
+            y: a.y,
+            z: a.z,
+            dx: dx / len,
+            dy: dy / len,
+            dz: dz / len,
+            friendly: false,
+            speed: 38 + Math.min(14, levelIdxRef.current),
+          });
+          a.fireCd = Math.max(0.75, 1.45 - levelIdxRef.current * 0.04) + Math.random() * 0.55;
+          playSfx("fire");
+        }
+
         for (const b of bullets.current) {
+          if (!b.friendly) continue;
           if (Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) < 1.75) {
             a.hp -= 1;
             b.z = 9999;
@@ -1839,7 +1902,13 @@ export function SkyEscort({ color }: { color: string }) {
       streakT.current = Math.max(0, streakT.current - clamped);
       if (streakT.current <= 0) killStreak.current = 0;
       aliens.current = aliens.current.filter((a) => a.hp > 0 && a.z < z.current + 35);
-      bullets.current = bullets.current.filter((b) => b.z > level.endZ - 30 && b.y > -6 && b.y < 50);
+      bullets.current = bullets.current.filter(
+        (b) =>
+          b.y > -6 &&
+          b.y < 55 &&
+          Math.hypot(b.x - x.current, b.z - z.current) < 110 &&
+          b.z > level.endZ - 40,
+      );
 
       invuln.current = Math.max(0, invuln.current - clamped);
       for (const bl of blasts.current) bl.age += clamped;
@@ -1994,8 +2063,11 @@ export function SkyEscort({ color }: { color: string }) {
       (b, mesh) => {
         mesh.visible = true;
         mesh.position.set(b.x, b.y, b.z);
+        const mat = mesh.material as THREE.MeshBasicMaterial;
+        mat.color.set(b.friendly ? "#ffe082" : "#ff4081");
+        mesh.scale.setScalar(b.friendly ? 1 : 1.35);
       },
-      () => new THREE.Mesh(new THREE.SphereGeometry(0.12, 6, 6), mats.bullet),
+      () => new THREE.Mesh(new THREE.SphereGeometry(0.12, 6, 6), mats.bullet.clone()),
     );
 
     syncGroup(
