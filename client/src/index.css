@@ -792,6 +792,16 @@ kbd {
   animation: sky-intro-rise 0.7s 0.4s ease-out both;
 }
 
+.sky-escort-intro-hint {
+  position: relative;
+  margin: 10px 0 0;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 11px;
+  color: rgba(255, 171, 64, 0.7);
+  animation: sky-intro-rise 0.7s 0.55s ease-out both;
+}
+
 .sky-escort-intro-bar {
   position: relative;
   width: min(52vw, 280px);
@@ -807,7 +817,7 @@ kbd {
   height: 100%;
   width: 40%;
   background: linear-gradient(90deg, #ff7043, #ffd54f);
-  animation: sky-intro-bar 1.7s ease-in-out forwards;
+  animation: sky-intro-bar 2.8s ease-in-out forwards;
 }
 
 @keyframes sky-intro-in {
@@ -915,74 +925,58 @@ kbd {
 .sky-escort-crosshair {
   position: absolute;
   left: 50%;
-  top: 50%;
-  width: 54px;
-  height: 54px;
+  top: 44%;
+  width: 36px;
+  height: 36px;
   translate: -50% -50%;
   pointer-events: none;
   z-index: 5;
-  opacity: 0.95;
+  opacity: 0.9;
 }
 
 .sky-escort-crosshair-h,
 .sky-escort-crosshair-v {
   position: absolute;
-  background: #ffe082;
-  box-shadow: 0 0 8px rgba(255, 171, 64, 0.75);
+  background: rgba(255, 236, 179, 0.95);
+  box-shadow: 0 0 6px rgba(255, 171, 64, 0.55);
 }
 
-.sky-escort-crosshair-h.left,
-.sky-escort-crosshair-h.right {
+/* Classic open reticle — gap in the center so the barrel tip stays readable */
+.sky-escort-crosshair-h {
+  left: 0;
+  right: 0;
   top: 50%;
-  width: 14px;
   height: 2px;
   margin-top: -1px;
+  clip-path: inset(0 42% 0 42%);
 }
 
-.sky-escort-crosshair-h.left { left: 0; }
-.sky-escort-crosshair-h.right { right: 0; }
-
-.sky-escort-crosshair-v.top,
-.sky-escort-crosshair-v.bottom {
+.sky-escort-crosshair-v {
+  top: 0;
+  bottom: 0;
   left: 50%;
   width: 2px;
-  height: 14px;
   margin-left: -1px;
-}
-
-.sky-escort-crosshair-v.top { top: 0; }
-.sky-escort-crosshair-v.bottom { bottom: 0; }
-
-.sky-escort-crosshair-dot {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 4px;
-  height: 4px;
-  margin: -2px 0 0 -2px;
-  border-radius: 50%;
-  background: #fff8e1;
-  box-shadow: 0 0 10px rgba(255, 213, 79, 0.9);
+  clip-path: inset(42% 0 42% 0);
 }
 
 .sky-escort-crosshair-ring {
   position: absolute;
-  inset: 6px;
-  border: 1px solid rgba(255, 224, 130, 0.55);
+  inset: 0;
+  border: 1.5px solid rgba(255, 224, 130, 0.7);
   border-radius: 50%;
+  box-shadow: 0 0 10px rgba(255, 171, 64, 0.35);
 }
 
 .sky-escort-crosshair.hit {
   opacity: 1;
-  transform: scale(1.25);
-  filter: brightness(1.7);
+  filter: brightness(1.5);
 }
 
 .sky-escort-crosshair.hit .sky-escort-crosshair-h,
 .sky-escort-crosshair.hit .sky-escort-crosshair-v,
-.sky-escort-crosshair.hit .sky-escort-crosshair-dot,
 .sky-escort-crosshair.hit .sky-escort-crosshair-ring {
   background: #fff8e1;
   border-color: #fff8e1;
-  box-shadow: 0 0 16px rgba(255, 213, 79, 1);
+  box-shadow: 0 0 14px rgba(255, 213, 79, 0.95);
 }

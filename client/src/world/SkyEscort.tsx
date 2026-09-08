@@ -153,6 +153,24 @@ function pathPoint(t: number, levelIdx: number, startZ: number, endZ: number): P
   return { t: tt, x: a.x, z: a.z, y: pathHeight(tt, levelIdx), yaw };
 }
 
+/** Cached path polyline — nearestOnPath was melting the frame after L1. */
+type PathCache = { key: string; samples: PathPoint[] };
+let pathCache: PathCache | null = null;
+
+function pathCacheKey(levelIdx: number, startZ: number, endZ: number) {
+  return `${levelIdx}:${startZ}:${endZ}`;
+}
+
+function ensurePathCache(levelIdx: number, startZ: number, endZ: number): PathPoint[] {
+  const key = pathCacheKey(levelIdx, startZ, endZ);
+  if (pathCache?.key === key) return pathCache.samples;
+  const samples: PathPoint[] = [];
+  const n = 64;
+  for (let i = 0; i <= n; i++) samples.push(pathPoint(i / n, levelIdx, startZ, endZ));
+  pathCache = { key, samples };
+  return samples;
+}
+
 function nearestOnPath(
   x: number,
   z: number,
@@ -160,22 +178,18 @@ function nearestOnPath(
   endZ: number,
   levelIdx: number,
 ): { dist: number; pt: PathPoint } {
-  let best = pathPoint(0, levelIdx, startZ, endZ);
-  let bestD = Infinity;
-  const samples = 96;
-  for (let i = 0; i <= samples; i++) {
-    const pt = pathPoint(i / samples, levelIdx, startZ, endZ);
-    const d = Math.hypot(pt.x - x, pt.z - z);
-    if (d < bestD) {
-      bestD = d;
-      best = pt;
-    }
-  }
-  // Refine around best
-  const span = 1 / samples;
-  for (let k = -4; k <= 4; k++) {
-    const t = Math.min(1, Math.max(0, best.t + k * span * 0.2));
-    const pt = pathPoint(t, levelIdx, startZ, endZ);
+  const samples = ensurePathCache(levelIdx, startZ, endZ);
+  // Coarse guess from Z progress, then local search — O(1) typical.
+  const span = Math.max(1, startZ - endZ);
+  let guess = Math.round(((startZ - z) / span) * (samples.length - 1));
+  guess = Math.min(samples.length - 1, Math.max(0, guess));
+  let best = samples[guess]!;
+  let bestD = Math.hypot(best.x - x, best.z - z);
+  const window = 10;
+  const lo = Math.max(0, guess - window);
+  const hi = Math.min(samples.length - 1, guess + window);
+  for (let i = lo; i <= hi; i++) {
+    const pt = samples[i]!;
     const d = Math.hypot(pt.x - x, pt.z - z);
     if (d < bestD) {
       bestD = d;
@@ -358,6 +372,7 @@ export function SkyEscort({ color }: { color: string }) {
   const clearBannerT = useRef(0);
   const [introLevel, setIntroLevel] = useState<{ idx: number; name: string } | null>(null);
   const introT = useRef(0);
+  const introSkipLock = useRef(0);
   const advancing = useRef(false);
   const loadout = useRef<Loadout>(DEFAULT_LOADOUT());
   const [loadoutHud, setLoadoutHud] = useState<Loadout>(DEFAULT_LOADOUT());
@@ -425,6 +440,7 @@ export function SkyEscort({ color }: { color: string }) {
   };
   const groundMesh = useRef<THREE.Mesh>(null);
   const rampGroup = useRef<THREE.Group>(null);
+  const craterGroup = useRef<THREE.Group>(null);
   const meteorGroup = useRef<THREE.Group>(null);
   const alienGroup = useRef<THREE.Group>(null);
   const bulletGroup = useRef<THREE.Group>(null);
@@ -665,6 +681,37 @@ export function SkyEscort({ color }: { color: string }) {
     }
   }
 
+  function syncCraterMeshes() {
+    const g = craterGroup.current;
+    if (!g) return;
+    const list = craters.current;
+    while (g.children.length < list.length) {
+      const m = new THREE.Mesh(
+        new THREE.CircleGeometry(1, 16),
+        new THREE.MeshStandardMaterial({
+          color: "#1a100c",
+          emissive: "#3e1f10",
+          emissiveIntensity: 0.35,
+          roughness: 1,
+          side: THREE.DoubleSide,
+        }),
+      );
+      m.rotation.x = -Math.PI / 2;
+      g.add(m);
+    }
+    while (g.children.length > list.length) {
+      const last = g.children[g.children.length - 1] as THREE.Mesh;
+      g.remove(last);
+      last.geometry.dispose();
+    }
+    list.forEach((c, i) => {
+      const m = g.children[i] as THREE.Mesh;
+      const hy = gy(c.x, c.z) + 0.06;
+      m.position.set(c.x, hy, c.z);
+      m.scale.setScalar(c.r * 0.95);
+    });
+  }
+
   function spawnPickups(L: LevelDef) {
     const list: Pickup[] = [];
     const kinds: UpgradeId[] = ["boost", "armor", "radar", "turret", "boost"];
@@ -780,12 +827,16 @@ export function SkyEscort({ color }: { color: string }) {
     speed.current = 0;
     falling.current = false;
     keys.current = { throttle: 0, steer: 0 };
-    z.current = Math.min(z.current, activeLevel().endZ + 4);
+    fireHeld.current = false;
+    lookQ.current.x = 0;
+    lookQ.current.y = 0;
     const g = pathAt(1);
     x.current = g.x;
     z.current = g.z;
     y.current = g.y + 0.85;
-    introT.current = 1.9;
+    // Long enough that the motion graphic actually lands; Space can't skip for 1.6s.
+    introT.current = 3.2;
+    introSkipLock.current = 1.6;
     introNextRef.current = next;
     setIntroLevel({ idx: next, name: nextL.name });
     addScore(hullRef.current * 50 + 200, `GATE +${hullRef.current * 50 + 200}`);
@@ -946,8 +997,8 @@ export function SkyEscort({ color }: { color: string }) {
       }
 
       if (p === "intro" && (e.code === "Space" || e.code === "Enter")) {
-        // Brief lockout so a held fire key doesn't skip instantly.
-        if (introT.current > 1.35) return;
+        // Held fire / accidental Space must not eat the motion graphic.
+        if (introSkipLock.current > 0) return;
         e.preventDefault();
         finishIntro();
         return;
@@ -1043,7 +1094,8 @@ export function SkyEscort({ color }: { color: string }) {
           const L = makeLevel(idx);
           introNextRef.current = idx;
           setIntroLevel({ idx, name: L.name });
-          introT.current = 3.4;
+          introT.current = 3.2;
+          introSkipLock.current = 1.6;
           advancing.current = true;
           setPhaseBoth("intro");
         }
@@ -1109,6 +1161,7 @@ export function SkyEscort({ color }: { color: string }) {
     }
     if (phaseRef.current === "intro") {
       introT.current -= clamped;
+      introSkipLock.current = Math.max(0, introSkipLock.current - clamped);
       if (introT.current <= 0) finishIntro();
     }
 
@@ -1493,6 +1546,7 @@ export function SkyEscort({ color }: { color: string }) {
     if (groundDirty.current || (groundMesh.current && groundMesh.current.geometry.attributes.position.count < 10)) {
       rebuildGroundSurface();
     }
+    syncCraterMeshes();
 
     syncGroup(
       meteorGroup.current,
@@ -1653,9 +1707,9 @@ export function SkyEscort({ color }: { color: string }) {
       const sp = Math.sin(gunPitch.current);
       // Eye sits behind the aim vector — truck turns do not whip the view.
       camera.position.set(
-        t.x - sy * 0.95 + ox * 0.12,
-        t.y + 0.55 + oy * 0.12,
-        t.z - cy * 0.95,
+        t.x - sy * 0.7 + ox * 0.1,
+        t.y + 0.62 + oy * 0.1,
+        t.z - cy * 0.7,
       );
       const dir = gunLookDir.current.set(sy * cp, sp, cy * cp);
       camera.lookAt(
@@ -1665,15 +1719,16 @@ export function SkyEscort({ color }: { color: string }) {
       );
       camera.layers.set(0);
       if (persp.isPerspectiveCamera) {
-        persp.fov = THREE.MathUtils.damp(persp.fov, hitFlash ? 74 : 68, 10, clamped);
-        persp.near = 0.08;
+        persp.fov = THREE.MathUtils.damp(persp.fov, hitFlash ? 72 : 65, 10, clamped);
+        persp.near = 0.05;
         persp.updateProjectionMatrix();
       }
       if (fpGun.current) {
         if (fpGun.current.parent !== camera) camera.add(fpGun.current);
         fpGun.current.visible = true;
-        fpGun.current.position.set(0, -0.55, -0.75);
-        fpGun.current.rotation.set(0, 0, 0);
+        // Big readable barrel in the lower FOV — was tiny / easy to miss.
+        fpGun.current.position.set(0, -0.42, -0.55);
+        fpGun.current.rotation.set(0.04, 0, 0);
       }
     } else {
       camera.layers.mask = 0xffffffff; // driver / ready: see cab + world
@@ -1756,6 +1811,7 @@ export function SkyEscort({ color }: { color: string }) {
         <planeGeometry args={[10, 10, 1, 1]} />
       </mesh>
       <group ref={rampGroup} />
+      <group ref={craterGroup} />
       <group ref={meteorGroup} />
       <group ref={alienGroup} />
       <group ref={bulletGroup} />
@@ -1896,24 +1952,37 @@ export function SkyEscort({ color }: { color: string }) {
         </group>
       </group>
 
-      {/* Slim FP iron — bottom of frame only (no cheek plates that read as a roof). */}
+      {/* FP turret — chunky barrel filling the lower frame so you always see the gun. */}
       <group ref={fpGun} visible={false}>
-        <mesh position={[0, 0.06, -0.15]}>
-          <boxGeometry args={[0.03, 0.07, 0.03]} />
-          <meshStandardMaterial color="#ffab40" emissive="#ff6d00" emissiveIntensity={1.2} />
+        <mesh position={[0, 0.12, -0.05]}>
+          <boxGeometry args={[0.06, 0.1, 0.06]} />
+          <meshBasicMaterial color="#ffab40" />
         </mesh>
-        <mesh position={[0, -0.12, 0.05]}>
-          <boxGeometry args={[0.22, 0.14, 0.35]} />
-          <meshStandardMaterial color="#d7ccc8" metalness={0.8} roughness={0.25} />
+        <mesh position={[0, -0.08, 0.15]}>
+          <boxGeometry args={[0.55, 0.28, 0.7]} />
+          <meshStandardMaterial color="#cfd8dc" metalness={0.75} roughness={0.3} emissive="#455a64" emissiveIntensity={0.25} />
         </mesh>
-        <mesh position={[0, -0.1, -0.85]} rotation={[Math.PI / 2, 0, 0]}>
-          <cylinderGeometry args={[0.04, 0.055, 1.2, 8]} />
-          <meshStandardMaterial color="#cfd8dc" metalness={0.85} roughness={0.2} />
+        <mesh position={[-0.38, -0.02, 0.05]}>
+          <boxGeometry args={[0.12, 0.35, 0.45]} />
+          <meshStandardMaterial color="#5d4037" metalness={0.5} roughness={0.45} />
         </mesh>
-        <mesh position={[0, -0.1, -1.45]} rotation={[Math.PI / 2, 0, 0]}>
-          <cylinderGeometry args={[0.07, 0.05, 0.14, 8]} />
-          <meshStandardMaterial color="#ffab40" emissive="#ff6d00" emissiveIntensity={1.1} />
+        <mesh position={[0.38, -0.02, 0.05]}>
+          <boxGeometry args={[0.12, 0.35, 0.45]} />
+          <meshStandardMaterial color="#5d4037" metalness={0.5} roughness={0.45} />
         </mesh>
+        <mesh position={[0, -0.06, -1.15]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.09, 0.12, 2.1, 10]} />
+          <meshStandardMaterial color="#eceff1" metalness={0.9} roughness={0.18} emissive="#90a4ae" emissiveIntensity={0.35} />
+        </mesh>
+        <mesh position={[0, -0.06, -2.15]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.14, 0.1, 0.28, 10]} />
+          <meshStandardMaterial color="#ffab40" emissive="#ff6d00" emissiveIntensity={1.4} metalness={0.6} />
+        </mesh>
+        <mesh position={[0, -0.28, 0.05]}>
+          <boxGeometry args={[0.18, 0.22, 0.35]} />
+          <meshStandardMaterial color="#3e2723" roughness={0.7} />
+        </mesh>
+        <pointLight position={[0, 0.05, -0.8]} color="#ffab40" intensity={2.2} distance={4} />
       </group>
 
       <Html fullscreen zIndexRange={[100, 0]} style={{ pointerEvents: phase === "ready" ? "auto" : "none" }}>
@@ -1926,6 +1995,7 @@ export function SkyEscort({ color }: { color: string }) {
               <p className="sky-escort-intro-num">LEVEL {introLevel.idx + 1}</p>
               <h2 className="sky-escort-intro-name">{introLevel.name}</h2>
               <p className="sky-escort-intro-sub">Sector locked — rolling out</p>
+              <p className="sky-escort-intro-hint">Hold tight · Enter skips after lock</p>
               <div className="sky-escort-intro-bar">
                 <span />
               </div>
@@ -1943,13 +2013,9 @@ export function SkyEscort({ color }: { color: string }) {
           )}
           {phase === "run" && seat === "gunner" && (
             <div className={`sky-escort-crosshair${hitFlash ? " hit" : ""}`} aria-hidden>
-              <span className="sky-escort-crosshair-gap" />
-              <span className="sky-escort-crosshair-h left" />
-              <span className="sky-escort-crosshair-h right" />
-              <span className="sky-escort-crosshair-v top" />
-              <span className="sky-escort-crosshair-v bottom" />
-              <span className="sky-escort-crosshair-dot" />
               <span className="sky-escort-crosshair-ring" />
+              <span className="sky-escort-crosshair-h" />
+              <span className="sky-escort-crosshair-v" />
             </div>
           )}
           <div
