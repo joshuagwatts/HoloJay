@@ -349,7 +349,7 @@ function syncGroup<T>(
 }
 
 export function SkyEscort({ color }: { color: string }) {
-  const { camera, gl } = useThree();
+  const { camera, gl, scene } = useThree();
   const selfId = useGame((s) => s.selfId) ?? "local";
   const location = useGame((s) => s.location);
   const players = useGame((s) => s.players);
@@ -1015,69 +1015,58 @@ export function SkyEscort({ color }: { color: string }) {
     };
   }, [camera]);
 
-  // Imperative FP gun on the camera — never reparent R3F JSX (that was crashing between levels
-  // and fighting visible={false}, so the barrel never stuck on screen).
+  // First-person viewmodel lives in the SCENE (not parented to the camera).
+  // Camera parenting + MeshStandardMaterial kept failing to show a barrel on alpha;
+  // scene-sync + MeshBasicMaterial is always lit and always in the graph R3F renders.
   useEffect(() => {
     const gun = new THREE.Group();
     gun.name = "sky-escort-fp-gun";
     gun.visible = false;
     gun.frustumCulled = false;
+    gun.renderOrder = 10;
 
-    const matSteel = new THREE.MeshStandardMaterial({
-      color: "#eceff1",
-      metalness: 0.9,
-      roughness: 0.18,
-      emissive: "#90a4ae",
-      emissiveIntensity: 0.45,
-    });
-    const matReceiver = new THREE.MeshStandardMaterial({
-      color: "#cfd8dc",
-      metalness: 0.75,
-      roughness: 0.3,
-      emissive: "#455a64",
-      emissiveIntensity: 0.3,
-    });
-    const matCheek = new THREE.MeshStandardMaterial({ color: "#5d4037", metalness: 0.5, roughness: 0.45 });
-    const matGrip = new THREE.MeshStandardMaterial({ color: "#3e2723", roughness: 0.7 });
-    const matMuzzle = new THREE.MeshStandardMaterial({
-      color: "#ffab40",
-      emissive: "#ff6d00",
-      emissiveIntensity: 1.5,
-      metalness: 0.6,
-    });
+    // Unlit materials — cannot wash out or depend on truck/camera lights.
+    const matSteel = new THREE.MeshBasicMaterial({ color: "#e8eef2" });
+    const matReceiver = new THREE.MeshBasicMaterial({ color: "#b0bec5" });
+    const matCheek = new THREE.MeshBasicMaterial({ color: "#6d4c41" });
+    const matGrip = new THREE.MeshBasicMaterial({ color: "#3e2723" });
+    const matMuzzle = new THREE.MeshBasicMaterial({ color: "#ffab40" });
+    const matBead = new THREE.MeshBasicMaterial({ color: "#ffe082" });
 
-    const bead = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.1, 0.05), new THREE.MeshBasicMaterial({ color: "#ffab40" }));
-    bead.position.set(0, 0.12, -0.55);
-    const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.32, 0.8), matReceiver);
-    receiver.position.set(0, -0.1, 0.4);
-    const cheekL = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.4, 0.55), matCheek);
-    cheekL.position.set(-0.42, -0.02, 0.28);
-    const cheekR = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.4, 0.55), matCheek);
-    cheekR.position.set(0.42, -0.02, 0.28);
+    const bead = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.12, 0.07), matBead);
+    bead.position.set(0, 0.16, -0.65);
+    const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.4, 0.95), matReceiver);
+    receiver.position.set(0, -0.12, 0.45);
+    const cheekL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.48, 0.7), matCheek);
+    cheekL.position.set(-0.52, -0.02, 0.32);
+    const cheekR = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.48, 0.7), matCheek);
+    cheekR.position.set(0.52, -0.02, 0.32);
     // Camera looks down -Z; -PI/2 puts cylinder tip toward muzzle / into the world.
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.125, 2.3, 12), matSteel);
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.15, 2.6, 14), matSteel);
     barrel.rotation.x = -Math.PI / 2;
-    barrel.position.set(0, -0.06, -1.1);
-    const muzzle = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.095, 0.3, 12), matMuzzle);
+    barrel.position.set(0, -0.04, -1.25);
+    const muzzle = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.12, 0.36, 12), matMuzzle);
     muzzle.rotation.x = -Math.PI / 2;
-    muzzle.position.set(0, -0.06, -2.3);
-    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.24, 0.42), matGrip);
-    grip.position.set(0, -0.32, 0.25);
-    const lite = new THREE.PointLight("#ffab40", 2.4, 5);
-    lite.position.set(0, 0.05, -0.95);
+    muzzle.position.set(0, -0.04, -2.55);
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.3, 0.5), matGrip);
+    grip.position.set(0, -0.38, 0.28);
 
-    gun.add(bead, receiver, cheekL, cheekR, barrel, muzzle, grip, lite);
+    gun.add(bead, receiver, cheekL, cheekR, barrel, muzzle, grip);
     gun.traverse((o) => {
       o.layers.set(0);
       o.frustumCulled = false;
+      if (o instanceof THREE.Mesh) {
+        o.renderOrder = 10;
+        // Draw on top of nearby truck bed geo so the viewmodel never "vanishes".
+        o.material.depthTest = true;
+        o.material.depthWrite = true;
+      }
     });
-    gun.position.set(0, -0.38, -0.5);
-    gun.rotation.set(0.05, 0, 0);
-    camera.add(gun);
+    scene.add(gun);
     fpGun.current = gun;
 
     return () => {
-      camera.remove(gun);
+      scene.remove(gun);
       gun.traverse((o) => {
         if (o instanceof THREE.Mesh) {
           o.geometry.dispose();
@@ -1088,7 +1077,7 @@ export function SkyEscort({ color }: { color: string }) {
       });
       fpGun.current = null;
     };
-  }, [camera]);
+  }, [scene]);
 
   useEffect(() => {
     const others = Object.values(players).filter((p) => p.id !== selfId);
@@ -1731,8 +1720,8 @@ export function SkyEscort({ color }: { color: string }) {
     }
     if (gunPitchMount.current) {
       gunPitchMount.current.rotation.x = -gunPitch.current;
-      // Local gunner uses the camera-locked FP gun — hide world barrel to avoid double mesh.
-      gunPitchMount.current.visible = !(seatRef.current === "gunner" && phaseRef.current === "run");
+      // Keep the world turret visible as a backup silhouette; FP viewmodel is the clear foreground.
+      gunPitchMount.current.visible = true;
     }
 
     if (groundDirty.current || (groundMesh.current && groundMesh.current.geometry.attributes.position.count < 10)) {
@@ -1888,24 +1877,24 @@ export function SkyEscort({ color }: { color: string }) {
         persp.updateProjectionMatrix();
       }
     } else if (seatRef.current === "gunner" && phaseRef.current === "run" && !pausedRef.current) {
-      // Gunner free-look: seat follows the truck, aim is pure world yaw/pitch (not chassis-locked).
+      // Gunner free-look: cheek-weld behind the turret; aim is pure world yaw/pitch.
       const t = turretWorld();
       const cy = Math.cos(gunYaw.current);
       const sy = Math.sin(gunYaw.current);
       const cp = Math.cos(gunPitch.current);
       const sp = Math.sin(gunPitch.current);
-      camera.position.set(
-        t.x - sy * 0.7 + ox * 0.1,
-        t.y + 0.62 + oy * 0.1,
-        t.z - cy * 0.7,
-      );
       const dir = gunLookDir.current.set(sy * cp, sp, cy * cp);
+      camera.position.set(
+        t.x - dir.x * 0.45 + ox * 0.08,
+        t.y + 0.42 + oy * 0.08,
+        t.z - dir.z * 0.45,
+      );
       camera.lookAt(
         camera.position.x + dir.x * 60,
         camera.position.y + dir.y * 60,
         camera.position.z + dir.z * 60,
       );
-      // Layer 0 only (cab is on 1). FP gun is also layer 0 and parented to the camera.
+      // Layer 0 only (cab is on 1). Viewmodel is scene-synced onto this camera pose.
       camera.layers.set(0);
       if (persp.isPerspectiveCamera) {
         persp.fov = THREE.MathUtils.damp(persp.fov, hitFlash ? 72 : 65, 10, clamped);
@@ -1913,9 +1902,14 @@ export function SkyEscort({ color }: { color: string }) {
         persp.updateProjectionMatrix();
       }
       if (fpGun.current) {
+        // Place viewmodel in camera space without parenting (R3F-safe).
+        camera.updateMatrixWorld();
+        const offset = gunEyeLocal.current.set(0.06, -0.42, -0.55);
+        offset.applyQuaternion(camera.quaternion);
         fpGun.current.visible = true;
-        fpGun.current.position.set(0, -0.38, -0.5);
-        fpGun.current.rotation.set(0.05, 0, 0);
+        fpGun.current.position.copy(camera.position).add(offset);
+        fpGun.current.quaternion.copy(camera.quaternion);
+        fpGun.current.rotateX(0.06);
       }
     } else {
       camera.layers.mask = 0xffffffff;
