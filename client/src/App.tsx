@@ -76,7 +76,8 @@ export function App() {
     try {
       const enter = sessionStorage.getItem("holojay.enter");
       if (!enter || !gameById(enter)) return;
-      if (useGame.getState().location.type === "game") {
+      const loc = useGame.getState().location;
+      if (loc.type === "game" && loc.gameId === enter) {
         sessionStorage.removeItem("holojay.enter");
         return;
       }
