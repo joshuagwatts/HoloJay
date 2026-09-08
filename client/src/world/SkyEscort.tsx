@@ -439,7 +439,7 @@ export function SkyEscort({ color }: { color: string }) {
   const gunMount = useRef<THREE.Group>(null);
   const gunPitchMount = useRef<THREE.Group>(null);
   /** First-person gun hardware locked to camera — always fills the gunner FOV. */
-  const fpGun = useRef<THREE.Group>(null);
+  const fpGun = useRef<THREE.Group | null>(null);
   const gunPivotWorld = useRef(new THREE.Vector3());
   const gunQuatWorld = useRef(new THREE.Quaternion());
   const gunEyeLocal = useRef(new THREE.Vector3());
@@ -749,10 +749,10 @@ export function SkyEscort({ color }: { color: string }) {
 
   function buildTerrain() {
     craters.current = [];
+    pathCache = null;
     groundDirty.current = true;
     spawnPickups(activeLevel());
-    // Mesh may not be mounted on first ready frame — rebuildGroundSurface runs in useFrame too.
-    rebuildGroundSurface();
+    // Rebuild on next frame — disposing geometry mid-useFrame was crashing between levels.
   }
 
   function applyPickup(kind: UpgradeId) {
@@ -839,6 +839,7 @@ export function SkyEscort({ color }: { color: string }) {
   }
 
   function offerUpgrades() {
+    if (phaseRef.current === "upgrade" && upgradeChoicesRef.current.length > 0) return;
     const L = loadout.current;
     const pool = (["boost", "armor", "radar", "turret"] as UpgradeId[]).filter((k) => {
       if (k === "radar" && L.radar) return false;
@@ -875,22 +876,25 @@ export function SkyEscort({ color }: { color: string }) {
     advancing.current = false;
     upgradeChoicesRef.current = [];
     setUpgradeChoices([]);
-    resetRun(seatRef.current, next);
-    emitMinigame(instanceId, "sky-escort", {
-      type: "role",
-      driverId: driverIdRef.current,
-      gunnerId: gunnerIdRef.current,
-      phase: "run",
-      levelId: makeLevel(next).id,
-    } satisfies RoleMsg);
+    // Defer reset so we don't rebuild terrain in the same input/frame as the overlay unmount.
+    queueMicrotask(() => {
+      resetRun(seatRef.current, next);
+      emitMinigame(instanceId, "sky-escort", {
+        type: "role",
+        driverId: driverIdRef.current,
+        gunnerId: gunnerIdRef.current,
+        phase: "run",
+        levelId: makeLevel(next).id,
+      } satisfies RoleMsg);
+    });
   }
 
   function finishIntro() {
+    if (phaseRef.current !== "intro") return;
     setIntroLevel(null);
     introT.current = 0;
     fireHeld.current = false;
     document.exitPointerLock?.();
-    // Motion graphic done — now pick a real upgrade before the next sector.
     offerUpgrades();
   }
 
@@ -1008,6 +1012,81 @@ export function SkyEscort({ color }: { color: string }) {
       camera.layers.enable(0);
       camera.layers.enable(1);
       camera.updateProjectionMatrix();
+    };
+  }, [camera]);
+
+  // Imperative FP gun on the camera — never reparent R3F JSX (that was crashing between levels
+  // and fighting visible={false}, so the barrel never stuck on screen).
+  useEffect(() => {
+    const gun = new THREE.Group();
+    gun.name = "sky-escort-fp-gun";
+    gun.visible = false;
+    gun.frustumCulled = false;
+
+    const matSteel = new THREE.MeshStandardMaterial({
+      color: "#eceff1",
+      metalness: 0.9,
+      roughness: 0.18,
+      emissive: "#90a4ae",
+      emissiveIntensity: 0.45,
+    });
+    const matReceiver = new THREE.MeshStandardMaterial({
+      color: "#cfd8dc",
+      metalness: 0.75,
+      roughness: 0.3,
+      emissive: "#455a64",
+      emissiveIntensity: 0.3,
+    });
+    const matCheek = new THREE.MeshStandardMaterial({ color: "#5d4037", metalness: 0.5, roughness: 0.45 });
+    const matGrip = new THREE.MeshStandardMaterial({ color: "#3e2723", roughness: 0.7 });
+    const matMuzzle = new THREE.MeshStandardMaterial({
+      color: "#ffab40",
+      emissive: "#ff6d00",
+      emissiveIntensity: 1.5,
+      metalness: 0.6,
+    });
+
+    const bead = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.1, 0.05), new THREE.MeshBasicMaterial({ color: "#ffab40" }));
+    bead.position.set(0, 0.12, -0.55);
+    const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.32, 0.8), matReceiver);
+    receiver.position.set(0, -0.1, 0.4);
+    const cheekL = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.4, 0.55), matCheek);
+    cheekL.position.set(-0.42, -0.02, 0.28);
+    const cheekR = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.4, 0.55), matCheek);
+    cheekR.position.set(0.42, -0.02, 0.28);
+    // Camera looks down -Z; -PI/2 puts cylinder tip toward muzzle / into the world.
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.125, 2.3, 12), matSteel);
+    barrel.rotation.x = -Math.PI / 2;
+    barrel.position.set(0, -0.06, -1.1);
+    const muzzle = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.095, 0.3, 12), matMuzzle);
+    muzzle.rotation.x = -Math.PI / 2;
+    muzzle.position.set(0, -0.06, -2.3);
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.24, 0.42), matGrip);
+    grip.position.set(0, -0.32, 0.25);
+    const lite = new THREE.PointLight("#ffab40", 2.4, 5);
+    lite.position.set(0, 0.05, -0.95);
+
+    gun.add(bead, receiver, cheekL, cheekR, barrel, muzzle, grip, lite);
+    gun.traverse((o) => {
+      o.layers.set(0);
+      o.frustumCulled = false;
+    });
+    gun.position.set(0, -0.38, -0.5);
+    gun.rotation.set(0.05, 0, 0);
+    camera.add(gun);
+    fpGun.current = gun;
+
+    return () => {
+      camera.remove(gun);
+      gun.traverse((o) => {
+        if (o instanceof THREE.Mesh) {
+          o.geometry.dispose();
+          const m = o.material;
+          if (Array.isArray(m)) m.forEach((x) => x.dispose());
+          else m.dispose();
+        }
+      });
+      fpGun.current = null;
     };
   }, [camera]);
 
@@ -1796,12 +1875,9 @@ export function SkyEscort({ color }: { color: string }) {
     const persp = camera as THREE.PerspectiveCamera;
 
     // Level motion graphic: shared cinematic for BOTH seats (not turret POV).
-    if (phaseRef.current === "intro") {
+    if (phaseRef.current === "intro" || phaseRef.current === "upgrade") {
       camera.layers.mask = 0xffffffff;
-      if (fpGun.current) {
-        fpGun.current.visible = false;
-        if (fpGun.current.parent === camera) camera.remove(fpGun.current);
-      }
+      if (fpGun.current) fpGun.current.visible = false;
       const tx = x.current - Math.sin(yaw.current) * 16;
       const ty = y.current + 9.5;
       const tz = z.current - Math.cos(yaw.current) * 16;
@@ -1818,7 +1894,6 @@ export function SkyEscort({ color }: { color: string }) {
       const sy = Math.sin(gunYaw.current);
       const cp = Math.cos(gunPitch.current);
       const sp = Math.sin(gunPitch.current);
-      // Eye sits behind the aim vector — truck turns do not whip the view.
       camera.position.set(
         t.x - sy * 0.7 + ox * 0.1,
         t.y + 0.62 + oy * 0.1,
@@ -1830,6 +1905,7 @@ export function SkyEscort({ color }: { color: string }) {
         camera.position.y + dir.y * 60,
         camera.position.z + dir.z * 60,
       );
+      // Layer 0 only (cab is on 1). FP gun is also layer 0 and parented to the camera.
       camera.layers.set(0);
       if (persp.isPerspectiveCamera) {
         persp.fov = THREE.MathUtils.damp(persp.fov, hitFlash ? 72 : 65, 10, clamped);
@@ -1837,18 +1913,13 @@ export function SkyEscort({ color }: { color: string }) {
         persp.updateProjectionMatrix();
       }
       if (fpGun.current) {
-        if (fpGun.current.parent !== camera) camera.add(fpGun.current);
         fpGun.current.visible = true;
-        // Big readable barrel in the lower FOV — was tiny / easy to miss.
-        fpGun.current.position.set(0, -0.42, -0.55);
-        fpGun.current.rotation.set(0.04, 0, 0);
+        fpGun.current.position.set(0, -0.38, -0.5);
+        fpGun.current.rotation.set(0.05, 0, 0);
       }
     } else {
-      camera.layers.mask = 0xffffffff; // driver / ready: see cab + world
-      if (fpGun.current) {
-        fpGun.current.visible = false;
-        if (fpGun.current.parent === camera) camera.remove(fpGun.current);
-      }
+      camera.layers.mask = 0xffffffff;
+      if (fpGun.current) fpGun.current.visible = false;
       if (persp.isPerspectiveCamera) {
         const boosting = boostTimer.current > 0 || fovKick.current > 0;
         const want = phaseRef.current === "ready" ? 58 : boosting ? 74 : 58;
@@ -2063,43 +2134,6 @@ export function SkyEscort({ color }: { color: string }) {
             <pointLight position={[0, 0.15, 1.0]} color="#ffab40" intensity={3.5} distance={7} />
           </group>
         </group>
-      </group>
-
-      {/* FP turret — camera looks down -Z; barrel must extend that way (muzzle away from face). */}
-      <group ref={fpGun} visible={false}>
-        {/* iron bead */}
-        <mesh position={[0, 0.1, -0.55]}>
-          <boxGeometry args={[0.05, 0.09, 0.05]} />
-          <meshBasicMaterial color="#ffab40" />
-        </mesh>
-        {/* receiver / breech near the camera */}
-        <mesh position={[0, -0.08, 0.35]}>
-          <boxGeometry args={[0.58, 0.3, 0.75]} />
-          <meshStandardMaterial color="#cfd8dc" metalness={0.75} roughness={0.3} emissive="#455a64" emissiveIntensity={0.25} />
-        </mesh>
-        <mesh position={[-0.4, -0.02, 0.25]}>
-          <boxGeometry args={[0.12, 0.35, 0.5]} />
-          <meshStandardMaterial color="#5d4037" metalness={0.5} roughness={0.45} />
-        </mesh>
-        <mesh position={[0.4, -0.02, 0.25]}>
-          <boxGeometry args={[0.12, 0.35, 0.5]} />
-          <meshStandardMaterial color="#5d4037" metalness={0.5} roughness={0.45} />
-        </mesh>
-        {/* barrel: -PI/2 puts cylinder +Y (narrow tip) toward camera -Z / into the world */}
-        <mesh position={[0, -0.06, -1.05]} rotation={[-Math.PI / 2, 0, 0]}>
-          <cylinderGeometry args={[0.08, 0.12, 2.2, 10]} />
-          <meshStandardMaterial color="#eceff1" metalness={0.9} roughness={0.18} emissive="#90a4ae" emissiveIntensity={0.35} />
-        </mesh>
-        {/* muzzle brake furthest down the sights */}
-        <mesh position={[0, -0.06, -2.2]} rotation={[-Math.PI / 2, 0, 0]}>
-          <cylinderGeometry args={[0.13, 0.09, 0.28, 10]} />
-          <meshStandardMaterial color="#ffab40" emissive="#ff6d00" emissiveIntensity={1.4} metalness={0.6} />
-        </mesh>
-        <mesh position={[0, -0.3, 0.2]}>
-          <boxGeometry args={[0.18, 0.22, 0.4]} />
-          <meshStandardMaterial color="#3e2723" roughness={0.7} />
-        </mesh>
-        <pointLight position={[0, 0.05, -0.9]} color="#ffab40" intensity={2.2} distance={4} />
       </group>
 
       <Html
