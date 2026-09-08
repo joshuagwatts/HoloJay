@@ -20,6 +20,8 @@ type LevelDef = {
   turnRate: number;
   meteorEvery: number;
   alienEvery: number;
+  /** Wave flavor — only rocks, only ships, or both */
+  threat: "meteors" | "aliens" | "mixed";
 };
 
 const LEVEL_NAMES = [
@@ -33,24 +35,37 @@ const LEVEL_NAMES = [
   "Last Ridge",
 ];
 
+function threatForLevel(n: number): "meteors" | "aliens" | "mixed" {
+  if (n <= 0) return "meteors";
+  if (n === 1) return "aliens";
+  const c = n % 3;
+  if (c === 0) return "meteors";
+  if (c === 1) return "aliens";
+  return "mixed";
+}
+
 /** Endless escalating runs — index 0 is gentle, denser chaos as you push. */
 function makeLevel(n: number): LevelDef {
   const t = Math.max(0, Math.floor(n));
   const soft = Math.min(t, 24);
+  const threat = threatForLevel(t);
+  // Early sectors breathe — L0/L1 are onboarding, not a meat grinder.
+  const earlyEase = t === 0 ? 1.55 : t === 1 ? 1.25 : 1;
+  const meteorBase = Math.max(0.38, (1.35 - soft * 0.04) * earlyEase);
+  const alienBase = Math.max(0.42, (1.4 - soft * 0.045) * earlyEase);
   return {
     id: `run-${t}`,
     name: LEVEL_NAMES[t] ?? `Wave ${t + 1}`,
     startZ: 24 + Math.min(soft, 10) * 1.4,
-    // Longer early runs so the fight has room to breathe (~12–16s L0).
     endZ: -(110 + soft * 30),
     halfW: 46 + Math.min(soft, 14) * 2.1,
     tile: 5,
     hull: 3 + (soft >= 6 ? 1 : 0) + (soft >= 14 ? 1 : 0),
     driveSpeed: 19 + Math.min(soft, 16) * 0.55,
     turnRate: 2.55,
-    // Early pressure is the whole point — don't wait until wave 10 to feel alive.
-    meteorEvery: Math.max(0.32, 0.92 - soft * 0.035),
-    alienEvery: Math.max(0.38, 0.95 - soft * 0.04),
+    meteorEvery: threat === "aliens" ? 99 : meteorBase,
+    alienEvery: threat === "meteors" ? 99 : alienBase,
+    threat,
   };
 }
 
@@ -257,7 +272,7 @@ type Alien = {
 
 function pickAlienMode(levelIdx: number): AlienMode {
   const r = Math.random();
-  if (levelIdx < 2) return r < 0.55 ? "dive" : "strafe";
+  if (levelIdx < 2) return r < 0.7 ? "dive" : "strafe";
   if (levelIdx < 5) {
     if (r < 0.3) return "dive";
     if (r < 0.55) return "strafe";
@@ -310,13 +325,30 @@ type Bullet = {
 type Blast = { id: number; x: number; y: number; z: number; age: number };
 
 /** Lowkey upgrade / booster scaffolding — expand later without rewriting the loop. */
-type UpgradeId = "boost" | "armor" | "radar" | "turret";
+type UpgradeId = "boost" | "armor" | "radar" | "turret" | "shield" | "twin" | "paint" | "body";
+type BodyStyle = "stock" | "widebody" | "ratrod" | "spoiler";
+type PaintKit = { id: string; label: string; primary: string; emissive: string };
+
+const PAINT_KITS: PaintKit[] = [
+  { id: "stock", label: "Factory rust", primary: "", emissive: "" }, // falls back to portal color
+  { id: "neon", label: "Neon drift", primary: "#00e5ff", emissive: "#00bcd4" },
+  { id: "venom", label: "Venom wrap", primary: "#76ff03", emissive: "#64dd17" },
+  { id: "magma", label: "Magma flake", primary: "#ff1744", emissive: "#ff5252" },
+  { id: "bone", label: "Bone chrome", primary: "#eceff1", emissive: "#90a4ae" },
+];
+
+const BODY_STYLES: BodyStyle[] = ["stock", "widebody", "ratrod", "spoiler"];
+
 type Loadout = {
   boostCharges: number;
   boostMax: number;
   armorBonus: number;
   radar: boolean;
   turretRate: number;
+  shieldCharges: number;
+  twinGun: boolean;
+  paintIdx: number;
+  bodyIdx: number;
 };
 type Pickup = {
   id: number;
@@ -333,6 +365,10 @@ const DEFAULT_LOADOUT = (): Loadout => ({
   armorBonus: 0,
   radar: false,
   turretRate: 1,
+  shieldCharges: 0,
+  twinGun: false,
+  paintIdx: 0,
+  bodyIdx: 0,
 });
 
 const UPGRADE_LABEL: Record<UpgradeId, string> = {
@@ -340,6 +376,10 @@ const UPGRADE_LABEL: Record<UpgradeId, string> = {
   armor: "Hull plate",
   radar: "Threat radar",
   turret: "Turret feed",
+  shield: "Bubble shield",
+  twin: "Double barrel",
+  paint: "Paint booth",
+  body: "Body kit",
 };
 
 const UPGRADE_BLURB: Record<UpgradeId, string> = {
@@ -347,6 +387,10 @@ const UPGRADE_BLURB: Record<UpgradeId, string> = {
   armor: "+1 max hull — tank one more hit",
   radar: "Paint dive ships and meteors in the sky",
   turret: "Faster bed-gun fire rate",
+  shield: "Absorb one hit in a glowing bubble",
+  twin: "Second barrel — fire two bolts at once",
+  paint: "Roll a fresh aftermarket wrap",
+  body: "Slap on a wild aftermarket body kit",
 };
 
 const UPGRADE_COLOR: Record<UpgradeId, string> = {
@@ -354,6 +398,10 @@ const UPGRADE_COLOR: Record<UpgradeId, string> = {
   armor: "#69f0ae",
   radar: "#40c4ff",
   turret: "#ffd54f",
+  shield: "#80d8ff",
+  twin: "#ffab40",
+  paint: "#e040fb",
+  body: "#ff6e40",
 };
 
 type Snap = {
@@ -493,6 +541,7 @@ export function SkyEscort({ color }: { color: string }) {
   const hitFlashT = useRef(0);
   const [hitFlash, setHitFlash] = useState(false);
   const fovKick = useRef(0);
+  const shieldPulse = useRef(0);
 
   const craters = useRef<Crater[]>([]);
   const meteors = useRef<Meteor[]>([]);
@@ -592,6 +641,18 @@ export function SkyEscort({ color }: { color: string }) {
 
   function hurt(n = 1) {
     if (invuln.current > 0) return;
+    if (loadout.current.shieldCharges > 0) {
+      loadout.current.shieldCharges -= 1;
+      setLoadoutHud({ ...loadout.current });
+      shieldPulse.current = 0.75;
+      invuln.current = 0.55;
+      shakeRef.current = Math.max(shakeRef.current, 0.45);
+      addBlast(x.current, y.current + 1.2, z.current);
+      playSfx("gate");
+      setClearBanner("SHIELD ABSORB");
+      clearBannerT.current = 0.85;
+      return;
+    }
     hullRef.current = Math.max(0, hullRef.current - n);
     setHull(hullRef.current);
     invuln.current = 0.85;
@@ -835,9 +896,24 @@ export function SkyEscort({ color }: { color: string }) {
       L.radar = true;
     } else if (kind === "turret") {
       L.turretRate = Math.min(1.85, L.turretRate + 0.3);
+    } else if (kind === "shield") {
+      L.shieldCharges = Math.min(3, L.shieldCharges + 1);
+      shieldPulse.current = 0.9;
+    } else if (kind === "twin") {
+      L.twinGun = true;
+    } else if (kind === "paint") {
+      L.paintIdx = (L.paintIdx + 1) % PAINT_KITS.length;
+    } else if (kind === "body") {
+      L.bodyIdx = (L.bodyIdx + 1) % BODY_STYLES.length;
     }
     setLoadoutHud({ ...L });
-    setClearBanner(`UPGRADE · ${UPGRADE_LABEL[kind].toUpperCase()}`);
+    const tag =
+      kind === "paint"
+        ? `PAINT · ${PAINT_KITS[L.paintIdx]!.label.toUpperCase()}`
+        : kind === "body"
+          ? `BODY · ${BODY_STYLES[L.bodyIdx]!.toUpperCase()}`
+          : `UPGRADE · ${UPGRADE_LABEL[kind].toUpperCase()}`;
+    setClearBanner(tag);
     clearBannerT.current = 1.8;
     playSfx("gate");
     shakeRef.current = Math.max(shakeRef.current, 0.4);
@@ -908,14 +984,17 @@ export function SkyEscort({ color }: { color: string }) {
   function offerUpgrades() {
     if (phaseRef.current === "upgrade" && upgradeChoicesRef.current.length > 0) return;
     const L = loadout.current;
-    const pool = (["boost", "armor", "radar", "turret"] as UpgradeId[]).filter((k) => {
+    const all: UpgradeId[] = ["boost", "armor", "radar", "turret", "shield", "twin", "paint", "body"];
+    const pool = all.filter((k) => {
       if (k === "radar" && L.radar) return false;
       if (k === "armor" && L.armorBonus >= 2) return false;
       if (k === "turret" && L.turretRate >= 1.85) return false;
       if (k === "boost" && L.boostMax >= 3) return false;
+      if (k === "shield" && L.shieldCharges >= 3) return false;
+      if (k === "twin" && L.twinGun) return false;
       return true;
     });
-    const bag = pool.length >= 2 ? [...pool] : (["boost", "armor", "radar", "turret"] as UpgradeId[]);
+    const bag = pool.length >= 2 ? [...pool] : [...all];
     const picks: UpgradeId[] = [];
     while (picks.length < 3 && bag.length) {
       const i = Math.floor(Math.random() * bag.length);
@@ -1059,8 +1138,17 @@ export function SkyEscort({ color }: { color: string }) {
     loadout.current.boostCharges = Math.min(loadout.current.boostMax, loadout.current.boostCharges + 1);
     setLoadoutHud({ ...loadout.current });
     buildTerrain();
-    // Seed dive ships further downrange so they approach from distance.
-    const seedN = 2 + Math.min(2, Math.floor(nextLevelIdx / 4));
+    // Seed threats for themed waves — keep L0 quiet.
+    const seedN =
+      L.threat === "meteors"
+        ? 0
+        : L.threat === "aliens"
+          ? nextLevelIdx <= 1
+            ? 1
+            : 2 + Math.min(2, Math.floor(nextLevelIdx / 5))
+          : nextLevelIdx <= 1
+            ? 1
+            : 2 + Math.min(2, Math.floor(nextLevelIdx / 4));
     for (let i = 0; i < seedN; i++) {
       const pt = pathPoint(0.22 + i * 0.12, nextLevelIdx, L.startZ, L.endZ);
       aliens.current.push(
@@ -1176,7 +1264,13 @@ export function SkyEscort({ color }: { color: string }) {
           <p className="sky-escort-intro-kicker">Next sector</p>
           <p className="sky-escort-intro-num">LEVEL {introLevel.idx + 1}</p>
           <h2 className="sky-escort-intro-name">{introLevel.name}</h2>
-          <p className="sky-escort-intro-sub">Sector locked — choose your upgrade next</p>
+          <p className="sky-escort-intro-sub">
+            {makeLevel(introLevel.idx).threat === "meteors"
+              ? "Meteor sector — watch the sky"
+              : makeLevel(introLevel.idx).threat === "aliens"
+                ? "Dive-ship sector — man the turret"
+                : "Mixed threats — rocks and ships"}
+          </p>
           <p className="sky-escort-intro-hint">Hold tight · Enter skips after lock</p>
           <div className="sky-escort-intro-bar">
             <span />
@@ -1665,11 +1759,14 @@ export function SkyEscort({ color }: { color: string }) {
       }
 
       meteorAcc.current += clamped;
-      const meteorEvery = Math.max(0.32, level.meteorEvery - progress * Math.min(0.35, 0.15 + levelIdxRef.current * 0.025));
-      if (meteorAcc.current >= meteorEvery) {
+      const meteorEvery = Math.max(
+        0.45,
+        level.meteorEvery - progress * Math.min(0.28, 0.1 + levelIdxRef.current * 0.02),
+      );
+      if (level.threat !== "aliens" && meteorAcc.current >= meteorEvery) {
         meteorAcc.current = 0;
         // Bias impacts toward the truck corridor so they matter.
-        const near = Math.random() < 0.62;
+        const near = Math.random() < (levelIdxRef.current < 2 ? 0.4 : 0.62);
         meteors.current.push({
           id: nextId.current++,
           x: near
@@ -1715,11 +1812,16 @@ export function SkyEscort({ color }: { color: string }) {
       meteors.current = meteors.current.filter((m) => m.y > -20 && m.z < z.current + 40);
 
       alienAcc.current += clamped;
-      const alienEvery = Math.max(0.36, level.alienEvery - progress * 0.55);
-      if (alienAcc.current >= alienEvery) {
+      const alienEvery = Math.max(0.48, level.alienEvery - progress * 0.4);
+      if (level.threat !== "meteors" && alienAcc.current >= alienEvery) {
         alienAcc.current = 0;
         // Spawn further downrange — ships come in from deep sky / ahead of the ribbon.
-        const pack = Math.random() < 0.35 + Math.min(0.35, levelIdxRef.current * 0.04) ? 2 : 1;
+        const pack =
+          levelIdxRef.current < 2
+            ? 1
+            : Math.random() < 0.3 + Math.min(0.35, levelIdxRef.current * 0.035)
+              ? 2
+              : 1;
         const here = nearPath(x.current, z.current).pt.t;
         for (let i = 0; i < pack; i++) {
           const pt = pathAt(Math.min(0.97, here + 0.24 + Math.random() * 0.22 + i * 0.05));
@@ -1781,17 +1883,26 @@ export function SkyEscort({ color }: { color: string }) {
           const cp = Math.cos(gunPitch.current);
           const sp = Math.sin(gunPitch.current);
           const tip = muzzleWorld();
-          bullets.current.push({
-            id: nextId.current++,
-            x: tip.x,
-            y: tip.y,
-            z: tip.z,
-            dx: sy * cp,
-            dy: sp,
-            dz: cy * cp,
-            friendly: true,
-            speed: 78,
-          });
+          const aimX = sy * cp;
+          const aimY = sp;
+          const aimZ = cy * cp;
+          // Perpendicular offset for twin barrels
+          const rx = cy;
+          const rz = -sy;
+          const offsets = loadout.current.twinGun ? [-0.28, 0.28] : [0];
+          for (const o of offsets) {
+            bullets.current.push({
+              id: nextId.current++,
+              x: tip.x + rx * o,
+              y: tip.y,
+              z: tip.z + rz * o,
+              dx: aimX,
+              dy: aimY,
+              dz: aimZ,
+              friendly: true,
+              speed: 78,
+            });
+          }
           fireCd.current = 0.11 / Math.max(0.85, loadout.current.turretRate);
           shakeRef.current = Math.max(shakeRef.current, 0.18);
           playSfx("fire");
@@ -1877,17 +1988,19 @@ export function SkyEscort({ color }: { color: string }) {
             a.z += (tz - a.z) * 0.72 * clamped + 9.2 * clamped;
           }
         } else {
-          // dive — commit hard
-          const diveMul = dist < 18 ? 1.65 : 1;
+          // dive — commit hard (gentler on early sectors)
+          const early = levelIdxRef.current < 2 ? 0.65 : 1;
+          const diveMul = (dist < 18 ? 1.65 : 1) * early;
           a.x += (tx - a.x) * 0.4 * diveMul * clamped;
           a.y += (ty - a.y) * 0.34 * diveMul * clamped;
-          a.z += (tz - a.z) * 0.5 * diveMul * clamped + 7.2 * clamped;
+          a.z += (tz - a.z) * 0.5 * diveMul * clamped + 7.2 * early * clamped;
         }
 
-        // Dive ships open fire from range before they kamikaze.
+        // Dive ships open fire from range — not on the tutorial sectors.
         if (
+          levelIdxRef.current >= 2 &&
           a.fireCd <= 0 &&
-          a.age > 0.45 &&
+          a.age > 0.85 &&
           dist < 48 &&
           dist > 9 &&
           a.y > y.current + 1.8 &&
@@ -2017,6 +2130,7 @@ export function SkyEscort({ color }: { color: string }) {
 
     shakeRef.current = Math.max(0, shakeRef.current - clamped * 1.8);
     fovKick.current = Math.max(0, fovKick.current - clamped * 1.4);
+    shieldPulse.current = Math.max(0, shieldPulse.current - clamped);
 
     if (buggy.current) {
       buggy.current.position.set(x.current, Math.max(y.current, -3), z.current);
@@ -2285,6 +2399,12 @@ export function SkyEscort({ color }: { color: string }) {
     }
   });
 
+  const paintKit = PAINT_KITS[loadoutHud.paintIdx] ?? PAINT_KITS[0]!;
+  const bodyPaint = paintKit.primary || color;
+  const bodyGlow = paintKit.emissive || color;
+  const bodyStyle = BODY_STYLES[loadoutHud.bodyIdx] ?? "stock";
+  const showShield = loadoutHud.shieldCharges > 0;
+
   return (
     <group>
       {/* Gunner viewmodel — always in the R3F tree; pose updated in useFrame. */}
@@ -2400,18 +2520,18 @@ export function SkyEscort({ color }: { color: string }) {
         {/* Pickup truck: short low cab forward, open bed, ring turret aft */}
         {/* chassis rail */}
         <mesh position={[0, 0.32, -0.15]} castShadow>
-          <boxGeometry args={[2.7, 0.42, 5.6]} />
+          <boxGeometry args={bodyStyle === "widebody" ? [3.15, 0.42, 5.6] : [2.7, 0.42, 5.6]} />
           <meshStandardMaterial color="#1c1612" metalness={0.45} roughness={0.55} />
         </mesh>
         {/* Cab/hood on layer 1 — gunner camera only sees layer 0 so they never fill the frame */}
         <group ref={bindCabHide}>
           <mesh position={[0, 0.78, 1.55]} castShadow>
-            <boxGeometry args={[2.35, 0.55, 1.55]} />
+            <boxGeometry args={[bodyStyle === "widebody" ? 2.7 : 2.35, 0.55, 1.55]} />
             <meshStandardMaterial color="#2a211a" metalness={0.4} roughness={0.5} />
           </mesh>
           <mesh position={[0, 1.15, 1.45]} castShadow>
-            <boxGeometry args={[2.05, 0.55, 1.15]} />
-            <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.85} />
+            <boxGeometry args={[bodyStyle === "widebody" ? 2.4 : 2.05, 0.55, 1.15]} />
+            <meshStandardMaterial color={bodyPaint} emissive={bodyGlow} emissiveIntensity={0.85} />
           </mesh>
           <mesh position={[0, 1.45, 1.4]}>
             <boxGeometry args={[1.85, 0.1, 1.0]} />
@@ -2425,25 +2545,55 @@ export function SkyEscort({ color }: { color: string }) {
             <boxGeometry args={[2.2, 0.85, 0.14]} />
             <meshStandardMaterial color="#241c16" metalness={0.45} />
           </mesh>
+          {bodyStyle === "ratrod" && (
+            <mesh position={[0, 1.05, 2.35]} castShadow>
+              <boxGeometry args={[1.1, 0.55, 0.9]} />
+              <meshStandardMaterial color="#78909c" metalness={0.85} roughness={0.25} emissive="#455a64" emissiveIntensity={0.35} />
+            </mesh>
+          )}
+          {bodyStyle === "spoiler" && (
+            <mesh position={[0, 1.85, 1.05]} castShadow>
+              <boxGeometry args={[1.6, 0.12, 0.55]} />
+              <meshStandardMaterial color={bodyPaint} emissive={bodyGlow} emissiveIntensity={0.5} metalness={0.4} />
+            </mesh>
+          )}
         </group>
         {/* open truck bed */}
         <mesh position={[0, 0.62, -1.15]} castShadow>
-          <boxGeometry args={[2.45, 0.16, 2.85]} />
+          <boxGeometry args={[bodyStyle === "widebody" ? 2.85 : 2.45, 0.16, 2.85]} />
           <meshStandardMaterial color="#1a1410" metalness={0.55} roughness={0.6} />
         </mesh>
         {/* bed side rails — low, don't block gunner */}
-        <mesh position={[-1.15, 0.95, -1.15]}>
-          <boxGeometry args={[0.12, 0.55, 2.7]} />
+        <mesh position={[bodyStyle === "widebody" ? -1.35 : -1.15, 0.95, -1.15]}>
+          <boxGeometry args={[0.12, bodyStyle === "widebody" ? 0.7 : 0.55, 2.7]} />
           <meshStandardMaterial color="#3e2723" metalness={0.5} />
         </mesh>
-        <mesh position={[1.15, 0.95, -1.15]}>
-          <boxGeometry args={[0.12, 0.55, 2.7]} />
+        <mesh position={[bodyStyle === "widebody" ? 1.35 : 1.15, 0.95, -1.15]}>
+          <boxGeometry args={[0.12, bodyStyle === "widebody" ? 0.7 : 0.55, 2.7]} />
           <meshStandardMaterial color="#3e2723" metalness={0.5} />
         </mesh>
         <mesh position={[0, 0.95, -2.5]}>
-          <boxGeometry args={[2.4, 0.5, 0.12]} />
+          <boxGeometry args={[bodyStyle === "widebody" ? 2.8 : 2.4, 0.5, 0.12]} />
           <meshStandardMaterial color="#3e2723" metalness={0.5} />
         </mesh>
+        {bodyStyle === "spoiler" && (
+          <mesh position={[0, 1.55, -2.55]} castShadow>
+            <boxGeometry args={[2.2, 0.1, 0.55]} />
+            <meshStandardMaterial color={bodyPaint} emissive={bodyGlow} emissiveIntensity={0.55} metalness={0.45} />
+          </mesh>
+        )}
+        {bodyStyle === "widebody" && (
+          <>
+            <mesh position={[-1.55, 0.55, 0.2]}>
+              <boxGeometry args={[0.35, 0.35, 3.8]} />
+              <meshStandardMaterial color={bodyPaint} emissive={bodyGlow} emissiveIntensity={0.35} />
+            </mesh>
+            <mesh position={[1.55, 0.55, 0.2]}>
+              <boxGeometry args={[0.35, 0.35, 3.8]} />
+              <meshStandardMaterial color={bodyPaint} emissive={bodyGlow} emissiveIntensity={0.35} />
+            </mesh>
+          </>
+        )}
         {[
           [-1.35, 0.12, 1.75],
           [1.35, 0.12, 1.75],
@@ -2451,15 +2601,32 @@ export function SkyEscort({ color }: { color: string }) {
           [1.35, 0.12, -1.85],
         ].map((p, i) => (
           <mesh key={i} position={p as [number, number, number]} rotation={[0, 0, Math.PI / 2]} castShadow>
-            <cylinderGeometry args={[0.58, 0.58, 0.45, 14]} />
+            <cylinderGeometry args={[bodyStyle === "widebody" ? 0.68 : 0.58, bodyStyle === "widebody" ? 0.68 : 0.58, 0.45, 14]} />
             <meshStandardMaterial color="#0e0a08" roughness={0.95} />
           </mesh>
         ))}
         <mesh position={[0, 0.55, 2.35]}>
           <sphereGeometry args={[0.28, 12, 12]} />
-          <meshStandardMaterial color={color} emissive={color} emissiveIntensity={2.6} />
+          <meshStandardMaterial color={bodyPaint} emissive={bodyGlow} emissiveIntensity={2.6} />
         </mesh>
-        <pointLight position={[0, 1.1, 2.1]} color={color} intensity={11} distance={15} />
+        <pointLight position={[0, 1.1, 2.1]} color={bodyGlow} intensity={11} distance={15} />
+
+        {/* Bubble shield — visible when charges remain or after a soak */}
+        {showShield && (
+          <mesh position={[0, 1.1, -0.2]}>
+            <sphereGeometry args={[3.1, 24, 16]} />
+            <meshStandardMaterial
+              color="#80d8ff"
+              emissive="#40c4ff"
+              emissiveIntensity={0.95}
+              transparent
+              opacity={0.16 + loadoutHud.shieldCharges * 0.06}
+              metalness={0.1}
+              roughness={0.2}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+        )}
 
         {/* bed ring + turret — pivot matches turretWorld (y≈1.65, z≈-2.45) */}
         <mesh position={[0, 0.78, -2.45]} rotation={[-Math.PI / 2, 0, 0]}>
@@ -2485,17 +2652,31 @@ export function SkyEscort({ color }: { color: string }) {
               <meshStandardMaterial color="#4e342e" metalness={0.55} roughness={0.45} />
             </mesh>
             <mesh position={[0, 0.08, 0.5]}>
-              <boxGeometry args={[0.32, 0.26, 0.55]} />
+              <boxGeometry args={[loadoutHud.twinGun ? 0.55 : 0.32, 0.26, 0.55]} />
               <meshStandardMaterial color="#efebe9" metalness={0.8} roughness={0.25} />
             </mesh>
-            <mesh position={[0, 0.06, 1.35]} rotation={[Math.PI / 2, 0, 0]}>
+            {/* Primary barrel */}
+            <mesh position={[loadoutHud.twinGun ? -0.22 : 0, 0.06, 1.35]} rotation={[Math.PI / 2, 0, 0]}>
               <cylinderGeometry args={[0.08, 0.11, 1.7, 10]} />
               <meshStandardMaterial color="#d7ccc8" metalness={0.85} roughness={0.2} />
             </mesh>
-            <mesh position={[0, 0.06, 2.2]} rotation={[Math.PI / 2, 0, 0]}>
+            <mesh position={[loadoutHud.twinGun ? -0.22 : 0, 0.06, 2.2]} rotation={[Math.PI / 2, 0, 0]}>
               <cylinderGeometry args={[0.13, 0.1, 0.2, 8]} />
               <meshStandardMaterial color="#ffab40" emissive="#ff6d00" emissiveIntensity={0.9} metalness={0.6} />
             </mesh>
+            {/* Twin barrel — visibly bolted on */}
+            {loadoutHud.twinGun && (
+              <>
+                <mesh position={[0.22, 0.06, 1.35]} rotation={[Math.PI / 2, 0, 0]}>
+                  <cylinderGeometry args={[0.08, 0.11, 1.7, 10]} />
+                  <meshStandardMaterial color="#d7ccc8" metalness={0.85} roughness={0.2} />
+                </mesh>
+                <mesh position={[0.22, 0.06, 2.2]} rotation={[Math.PI / 2, 0, 0]}>
+                  <cylinderGeometry args={[0.13, 0.1, 0.2, 8]} />
+                  <meshStandardMaterial color="#ffab40" emissive="#ff6d00" emissiveIntensity={0.9} metalness={0.6} />
+                </mesh>
+              </>
+            )}
             <mesh position={[-0.32, -0.08, 0.12]} rotation={[0.4, 0, 0.2]}>
               <cylinderGeometry args={[0.045, 0.045, 0.4, 6]} />
               <meshStandardMaterial color="#3e2723" />
@@ -2604,6 +2785,16 @@ export function SkyEscort({ color }: { color: string }) {
                   <span className={loadoutHud.radar ? "on" : ""}>RADAR</span>
                   <span className={loadoutHud.turretRate > 1 ? "on" : ""}>
                     TURRET ×{loadoutHud.turretRate.toFixed(2)}
+                  </span>
+                  <span className={loadoutHud.shieldCharges > 0 ? "on" : ""}>
+                    SHIELD {loadoutHud.shieldCharges}
+                  </span>
+                  <span className={loadoutHud.twinGun ? "on" : ""}>TWIN</span>
+                  <span className={loadoutHud.paintIdx > 0 ? "on" : ""}>
+                    {PAINT_KITS[loadoutHud.paintIdx]?.label ?? "Paint"}
+                  </span>
+                  <span className={loadoutHud.bodyIdx > 0 ? "on" : ""}>
+                    {BODY_STYLES[loadoutHud.bodyIdx] ?? "stock"}
                   </span>
                 </div>
                 <p>
