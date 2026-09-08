@@ -236,7 +236,7 @@ function groundY(
 }
 
 type Role = "driver" | "gunner";
-type Phase = "ready" | "run" | "intro" | "won" | "dead";
+type Phase = "ready" | "run" | "intro" | "upgrade" | "won" | "dead";
 
 type Meteor = { id: number; x: number; y: number; z: number; vx: number; vy: number; vz: number };
 type Alien = { id: number; x: number; y: number; z: number; hp: number };
@@ -274,6 +274,13 @@ const UPGRADE_LABEL: Record<UpgradeId, string> = {
   armor: "Hull plate",
   radar: "Threat radar",
   turret: "Turret feed",
+};
+
+const UPGRADE_BLURB: Record<UpgradeId, string> = {
+  boost: "Extra Shift boost charge for the next sectors",
+  armor: "+1 max hull — tank one more hit",
+  radar: "Paint dive ships and meteors in the sky",
+  turret: "Faster bed-gun fire rate",
 };
 
 const UPGRADE_COLOR: Record<UpgradeId, string> = {
@@ -371,6 +378,10 @@ export function SkyEscort({ color }: { color: string }) {
   const [clearBanner, setClearBanner] = useState<string | null>(null);
   const clearBannerT = useRef(0);
   const [introLevel, setIntroLevel] = useState<{ idx: number; name: string } | null>(null);
+  const [upgradeChoices, setUpgradeChoices] = useState<UpgradeId[]>([]);
+  const upgradeChoicesRef = useRef<UpgradeId[]>([]);
+  const [paused, setPaused] = useState(false);
+  const pausedRef = useRef(false);
   const introT = useRef(0);
   const introSkipLock = useRef(0);
   const advancing = useRef(false);
@@ -713,21 +724,20 @@ export function SkyEscort({ color }: { color: string }) {
   }
 
   function spawnPickups(L: LevelDef) {
+    // Mid-run pads are bonus juice — real upgrades are chosen between levels.
     const list: Pickup[] = [];
-    const kinds: UpgradeId[] = ["boost", "armor", "radar", "turret", "boost"];
-    const pads = 5 + Math.min(3, Math.floor(levelIdxRef.current / 2));
+    const pads = 2;
     for (let i = 0; i < pads; i++) {
-      const tAlong = 0.12 + (i / Math.max(1, pads - 1)) * 0.76;
+      const tAlong = 0.28 + i * 0.35;
       const pt = pathPoint(tAlong, levelIdxRef.current, L.startZ, L.endZ);
       const side = i % 2 === 0 ? 1 : -1;
       const nx = -Math.sin(pt.yaw + Math.PI / 2);
       const nz = -Math.cos(pt.yaw + Math.PI / 2);
       const xx = pt.x + nx * side * 3.2;
       const zz = pt.z + nz * side * 3.2;
-      const kind = kinds[i % kinds.length]!;
       list.push({
         id: nextId.current++,
-        kind,
+        kind: "boost",
         x: xx,
         y: groundY(xx, zz, L.startZ, L.endZ, craters.current, levelIdxRef.current) + 1.1,
         z: zz,
@@ -818,9 +828,76 @@ export function SkyEscort({ color }: { color: string }) {
   }
 
 
+  function setPausedBoth(next: boolean) {
+    pausedRef.current = next;
+    setPaused(next);
+    if (next) {
+      fireHeld.current = false;
+      keys.current = { throttle: 0, steer: 0 };
+      document.exitPointerLock?.();
+    }
+  }
+
+  function offerUpgrades() {
+    const L = loadout.current;
+    const pool = (["boost", "armor", "radar", "turret"] as UpgradeId[]).filter((k) => {
+      if (k === "radar" && L.radar) return false;
+      if (k === "armor" && L.armorBonus >= 2) return false;
+      if (k === "turret" && L.turretRate >= 1.85) return false;
+      if (k === "boost" && L.boostMax >= 3) return false;
+      return true;
+    });
+    const bag = pool.length >= 2 ? [...pool] : (["boost", "armor", "radar", "turret"] as UpgradeId[]);
+    const picks: UpgradeId[] = [];
+    while (picks.length < 3 && bag.length) {
+      const i = Math.floor(Math.random() * bag.length);
+      picks.push(bag.splice(i, 1)[0]!);
+    }
+    while (picks.length < 3) picks.push(picks[picks.length - 1] ?? "boost");
+    upgradeChoicesRef.current = picks;
+    setUpgradeChoices(picks);
+    setPausedBoth(false);
+    setPhaseBoth("upgrade");
+    emitMinigame(instanceId, "sky-escort", {
+      type: "role",
+      driverId: driverIdRef.current,
+      gunnerId: gunnerIdRef.current,
+      phase: "upgrade",
+      levelId: makeLevel(introNextRef.current).id,
+    } satisfies RoleMsg);
+  }
+
+  function chooseUpgrade(kind: UpgradeId) {
+    if (phaseRef.current !== "upgrade") return;
+    if (!isHost && !solo) return;
+    applyPickup(kind);
+    const next = introNextRef.current;
+    advancing.current = false;
+    upgradeChoicesRef.current = [];
+    setUpgradeChoices([]);
+    resetRun(seatRef.current, next);
+    emitMinigame(instanceId, "sky-escort", {
+      type: "role",
+      driverId: driverIdRef.current,
+      gunnerId: gunnerIdRef.current,
+      phase: "run",
+      levelId: makeLevel(next).id,
+    } satisfies RoleMsg);
+  }
+
+  function finishIntro() {
+    setIntroLevel(null);
+    introT.current = 0;
+    fireHeld.current = false;
+    document.exitPointerLock?.();
+    // Motion graphic done — now pick a real upgrade before the next sector.
+    offerUpgrades();
+  }
+
   function beginAdvance() {
     if (advancing.current || phaseRef.current !== "run") return;
     advancing.current = true;
+    setPausedBoth(false);
     const next = levelIdxRef.current + 1;
     const nextL = makeLevel(next);
     // Freeze on the pad
@@ -834,15 +911,13 @@ export function SkyEscort({ color }: { color: string }) {
     x.current = g.x;
     z.current = g.z;
     y.current = g.y + 0.85;
-    // Long enough that the motion graphic actually lands; Space can't skip for 1.6s.
-    introT.current = 3.2;
-    introSkipLock.current = 1.6;
+    introT.current = 2.6;
+    introSkipLock.current = 1.2;
     introNextRef.current = next;
     setIntroLevel({ idx: next, name: nextL.name });
     addScore(hullRef.current * 50 + 200, `GATE +${hullRef.current * 50 + 200}`);
     playSfx("gate");
     setPhaseBoth("intro");
-    // Drop pointer lock so the motion graphic is obvious for both seats.
     document.exitPointerLock?.();
     emitMinigame(instanceId, "sky-escort", {
       type: "role",
@@ -850,22 +925,6 @@ export function SkyEscort({ color }: { color: string }) {
       gunnerId: gunnerIdRef.current,
       phase: "intro",
       levelId: nextL.id,
-    } satisfies RoleMsg);
-  }
-
-  function finishIntro() {
-    const next = introNextRef.current;
-    const role = seatRef.current;
-    setIntroLevel(null);
-    introT.current = 0;
-    advancing.current = false;
-    resetRun(role, next);
-    emitMinigame(instanceId, "sky-escort", {
-      type: "role",
-      driverId: driverIdRef.current,
-      gunnerId: gunnerIdRef.current,
-      phase: "run",
-      levelId: makeLevel(next).id,
     } satisfies RoleMsg);
   }
 
@@ -891,7 +950,7 @@ export function SkyEscort({ color }: { color: string }) {
     speed.current = 0;
     falling.current = false;
     invuln.current = 0;
-    hullRef.current = L.hull + (phaseRef.current === "intro" ? loadout.current.armorBonus : 0);
+    hullRef.current = L.hull + (phaseRef.current === "intro" || phaseRef.current === "upgrade" ? loadout.current.armorBonus : 0);
     setHull(hullRef.current);
     // Fresh attempt from ready / death resets score + loadout; level clears keep them.
     if (nextLevelIdx === 0 || phaseRef.current === "dead" || phaseRef.current === "ready") {
@@ -973,6 +1032,24 @@ export function SkyEscort({ color }: { color: string }) {
       if (e.repeat) return;
       const p = phaseRef.current;
 
+      if (e.code === "Escape") {
+        e.preventDefault();
+        if (p === "run") {
+          setPausedBoth(!pausedRef.current);
+        } else if (p === "upgrade") {
+          // stay on upgrade — Esc does nothing
+        }
+        return;
+      }
+
+      if (pausedRef.current) {
+        if (e.code === "Space" || e.code === "Enter" || e.code === "KeyP") {
+          e.preventDefault();
+          setPausedBoth(false);
+        }
+        return;
+      }
+
       if (p === "ready") {
         if (e.code === "Digit1" || e.code === "KeyQ") pickSeat("driver");
         if (e.code === "Digit2" || e.code === "KeyE") pickSeat("gunner");
@@ -997,10 +1074,28 @@ export function SkyEscort({ color }: { color: string }) {
       }
 
       if (p === "intro" && (e.code === "Space" || e.code === "Enter")) {
-        // Held fire / accidental Space must not eat the motion graphic.
         if (introSkipLock.current > 0) return;
         e.preventDefault();
         finishIntro();
+        return;
+      }
+
+      if (p === "upgrade") {
+        if (e.code === "Digit1" || e.code === "Numpad1") {
+          e.preventDefault();
+          const k = upgradeChoicesRef.current[0];
+          if (k) chooseUpgrade(k);
+        }
+        if (e.code === "Digit2" || e.code === "Numpad2") {
+          e.preventDefault();
+          const k = upgradeChoicesRef.current[1];
+          if (k) chooseUpgrade(k);
+        }
+        if (e.code === "Digit3" || e.code === "Numpad3") {
+          e.preventDefault();
+          const k = upgradeChoicesRef.current[2];
+          if (k) chooseUpgrade(k);
+        }
         return;
       }
 
@@ -1053,12 +1148,12 @@ export function SkyEscort({ color }: { color: string }) {
   useEffect(() => {
     const el = gl.domElement;
     const onMove = (e: MouseEvent) => {
-      if (phaseRef.current !== "run" || seatRef.current !== "gunner") return;
+      if (phaseRef.current !== "run" || pausedRef.current || seatRef.current !== "gunner") return;
       lookQ.current.x += e.movementX;
       lookQ.current.y += e.movementY;
     };
     const onDown = () => {
-      if (phaseRef.current !== "run" || seatRef.current !== "gunner") return;
+      if (phaseRef.current !== "run" || pausedRef.current || seatRef.current !== "gunner") return;
       if (document.pointerLockElement !== el) void el.requestPointerLock();
       fireHeld.current = true;
     };
@@ -1094,10 +1189,17 @@ export function SkyEscort({ color }: { color: string }) {
           const L = makeLevel(idx);
           introNextRef.current = idx;
           setIntroLevel({ idx, name: L.name });
-          introT.current = 3.2;
-          introSkipLock.current = 1.6;
+          introT.current = 2.6;
+          introSkipLock.current = 1.2;
           advancing.current = true;
+          setPausedBoth(false);
           setPhaseBoth("intro");
+        }
+        if (data.phase === "upgrade" && !isHost) {
+          const idx = levelIndexFromId(data.levelId);
+          introNextRef.current = idx;
+          setIntroLevel(null);
+          offerUpgrades();
         }
         if (data.phase === "run" && !isHost) {
           const idx = levelIndexFromId(data.levelId);
@@ -1165,7 +1267,13 @@ export function SkyEscort({ color }: { color: string }) {
       if (introT.current <= 0) finishIntro();
     }
 
-    if (phaseRef.current === "run" && seatRef.current === "driver" && !isHost) {
+    if (pausedRef.current || phaseRef.current === "upgrade") {
+      // Frozen — still keep the truck posed; skip sim / threats.
+      if (buggy.current) {
+        buggy.current.position.set(x.current, Math.max(y.current, -3), z.current);
+        buggy.current.rotation.y = yaw.current;
+      }
+    } else if (phaseRef.current === "run" && seatRef.current === "driver" && !isHost) {
       snapAcc.current += clamped;
       if (snapAcc.current > 0.05) {
         snapAcc.current = 0;
@@ -1178,7 +1286,7 @@ export function SkyEscort({ color }: { color: string }) {
       }
     }
 
-    if (phaseRef.current === "run" && isHost) {
+    if (phaseRef.current === "run" && isHost && !pausedRef.current) {
       let throttle = keys.current.throttle;
       let steer = keys.current.steer;
       const rin = remoteInput.current;
@@ -1503,14 +1611,19 @@ export function SkyEscort({ color }: { color: string }) {
     }
 
     // Failsafe: solo / host-desync still advance when crossing the gate.
-    if (!advancing.current && phaseRef.current === "run" && (solo || isHost)) {
+    if (
+      !advancing.current &&
+      phaseRef.current === "run" &&
+      !pausedRef.current &&
+      (solo || isHost)
+    ) {
       const gate = pathAt(1);
       if (Math.hypot(gate.x - x.current, gate.z - z.current) < 10 || nearPath(x.current, z.current).pt.t > 0.965) {
         beginAdvance();
       }
     }
 
-    if (phaseRef.current === "run" && !isHost && seatRef.current === "gunner") {
+    if (phaseRef.current === "run" && !pausedRef.current && !isHost && seatRef.current === "gunner") {
       gunYaw.current -= lookQ.current.x * 0.0032;
       gunPitch.current = Math.max(-0.4, Math.min(0.9, gunPitch.current - lookQ.current.y * 0.0028));
       lookQ.current.x *= 0.08;
@@ -1698,7 +1811,7 @@ export function SkyEscort({ color }: { color: string }) {
         persp.fov = 58;
         persp.updateProjectionMatrix();
       }
-    } else if (seatRef.current === "gunner" && phaseRef.current === "run") {
+    } else if (seatRef.current === "gunner" && phaseRef.current === "run" && !pausedRef.current) {
       // Gunner free-look: seat follows the truck, aim is pure world yaw/pitch (not chassis-locked).
       const t = turretWorld();
       const cy = Math.cos(gunYaw.current);
@@ -1989,7 +2102,11 @@ export function SkyEscort({ color }: { color: string }) {
         <pointLight position={[0, 0.05, -0.9]} color="#ffab40" intensity={2.2} distance={4} />
       </group>
 
-      <Html fullscreen zIndexRange={[100, 0]} style={{ pointerEvents: phase === "ready" ? "auto" : "none" }}>
+      <Html
+        fullscreen
+        zIndexRange={[100, 0]}
+        style={{ pointerEvents: phase === "ready" || phase === "upgrade" || paused ? "auto" : "none" }}
+      >
         <div className="sky-escort-hud">
           {phase === "intro" && introLevel && (
             <div className="sky-escort-intro" aria-live="polite">
@@ -1998,11 +2115,51 @@ export function SkyEscort({ color }: { color: string }) {
               <p className="sky-escort-intro-kicker">Next sector</p>
               <p className="sky-escort-intro-num">LEVEL {introLevel.idx + 1}</p>
               <h2 className="sky-escort-intro-name">{introLevel.name}</h2>
-              <p className="sky-escort-intro-sub">Sector locked — rolling out</p>
+              <p className="sky-escort-intro-sub">Sector locked — choose your upgrade next</p>
               <p className="sky-escort-intro-hint">Hold tight · Enter skips after lock</p>
               <div className="sky-escort-intro-bar">
                 <span />
               </div>
+            </div>
+          )}
+          {phase === "upgrade" && (
+            <div className="sky-escort-upgrade" aria-live="polite">
+              <p className="sky-escort-upgrade-kicker">Gate cleared</p>
+              <h2 className="sky-escort-upgrade-title">PICK AN UPGRADE</h2>
+              <p className="sky-escort-upgrade-sub">
+                Level {introNextRef.current + 1} · {makeLevel(introNextRef.current).name}
+              </p>
+              <div className="sky-escort-upgrade-grid">
+                {upgradeChoices.map((kind, i) => (
+                  <button
+                    key={`${kind}-${i}`}
+                    type="button"
+                    className="sky-escort-upgrade-card"
+                    style={{ ["--up-color" as string]: UPGRADE_COLOR[kind] }}
+                    onClick={() => chooseUpgrade(kind)}
+                    disabled={!isHost && !solo}
+                  >
+                    <span className="sky-escort-upgrade-key">{i + 1}</span>
+                    <strong>{UPGRADE_LABEL[kind]}</strong>
+                    <em>{UPGRADE_BLURB[kind]}</em>
+                  </button>
+                ))}
+              </div>
+              <p className="sky-escort-upgrade-hint">
+                {isHost || solo ? "Click a card or press 1 / 2 / 3" : "Waiting for host to pick…"}
+              </p>
+            </div>
+          )}
+          {paused && phase === "run" && (
+            <div className="sky-escort-pause" aria-live="polite">
+              <p className="sky-escort-pause-kicker">Paused</p>
+              <h2 className="sky-escort-pause-title">HOLD UP</h2>
+              <div className="sky-escort-pause-actions">
+                <button type="button" className="primary" onClick={() => setPausedBoth(false)}>
+                  Resume
+                </button>
+              </div>
+              <p className="sky-escort-pause-hint">Esc / Space / Enter to resume</p>
             </div>
           )}
           {phase === "dead" && (
@@ -2024,7 +2181,7 @@ export function SkyEscort({ color }: { color: string }) {
           )}
           <div
             className="sky-escort-card"
-            style={{ visibility: phase === "intro" || phase === "dead" ? "hidden" : "visible" }}
+            style={{ visibility: phase === "intro" || phase === "dead" || phase === "upgrade" || paused ? "hidden" : "visible" }}
           >
             <em>{level.name}</em>
             <strong>Sky Escort</strong>
@@ -2066,7 +2223,7 @@ export function SkyEscort({ color }: { color: string }) {
                   </button>
                 </div>
                 <p className="sky-escort-hint">
-                  Level {levelIdx + 1} · endless · Space / Enter starts · Tab swaps seat · Return leaves
+                  Level {levelIdx + 1} · endless · Esc pauses · Space starts · Tab swaps seat
                 </p>
               </>
             )}
@@ -2089,8 +2246,8 @@ export function SkyEscort({ color }: { color: string }) {
                 {clearBanner ? <p className="sky-escort-alert">{clearBanner}</p> : failCue ? <p className="sky-escort-alert">METEOR IMPACT</p> : null}
                 <p className="sky-escort-hint">
                   {seat === "driver"
-                    ? "WASD · Shift boost · stay on the ribbon · bridge & corkscrew"
-                    : "Mouse free-look · hold fire · upgrades · radar paints threats"}
+                    ? "WASD · Shift boost · Esc pause · stay on the ribbon"
+                    : "Mouse free-look · hold fire · Esc pause · radar paints threats"}
                 </p>
               </>
             )}
