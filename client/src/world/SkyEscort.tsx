@@ -585,6 +585,15 @@ export function SkyEscort({ color }: { color: string }) {
   const gateArch = useRef<THREE.Group>(null);
   const headingArrow = useRef<THREE.Group>(null);
   const introNextRef = useRef(1);
+  const skyQa = useMemo(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      return { radar: p.get("skyRadar") === "1", intro: p.get("skyIntro") === "1" };
+    } catch {
+      return { radar: false, intro: false };
+    }
+  }, []);
+  const skyQaIntroArmed = useRef(skyQa.intro);
 
   const phaseRef = useRef<Phase>("ready");
   const seatRef = useRef<Role>("driver");
@@ -1454,6 +1463,14 @@ export function SkyEscort({ color }: { color: string }) {
     };
   }, [camera]);
 
+  // QA deep-link helpers: ?skyRadar=1 equips Threat radar; ?skyIntro=1 plays the unlock mograph.
+  useEffect(() => {
+    if (skyQa.radar) {
+      loadout.current.radar = true;
+      setLoadoutHud({ ...loadout.current });
+    }
+  }, [skyQa.radar]);
+
   useEffect(() => {
     const others = Object.values(players).filter((p) => p.id !== selfId);
     if (instanceId.startsWith("local:") || offline || others.length === 0) {
@@ -1717,6 +1734,12 @@ export function SkyEscort({ color }: { color: string }) {
     const clamped = Math.min(dt, 0.05);
     const level = activeLevel();
     const progress = nearPath(x.current, z.current).pt.t;
+    if (skyQaIntroArmed.current && phaseRef.current === "ready") {
+      skyQaIntroArmed.current = false;
+      phaseRef.current = "run";
+      setPhase("run");
+      beginAdvance();
+    }
     hudAcc.current += clamped;
     if (hudAcc.current > 0.12) {
       hudAcc.current = 0;

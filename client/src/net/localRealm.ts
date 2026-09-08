@@ -141,6 +141,22 @@ export function localLoopComplete(): void {
   }, 3200);
 }
 
+function enterGameRoom(gameId: string): void {
+  const state = useGame.getState();
+  if (!gameById(gameId)) {
+    state.setNotice("That door is closed");
+    return;
+  }
+  state.setLocation({ type: "game", gameId, instanceId: `local:${gameId}` });
+  if (gameId === "lane-rush") {
+    state.setNotice("Lane Rush — Enter to start · Return in HUD to leave");
+  } else if (gameId === "sky-escort") {
+    state.setNotice("Sky Escort — pick a seat · Return in HUD to leave");
+  } else {
+    state.setNotice("Hold E at the return door to leave");
+  }
+}
+
 export function localEnter(source: "path" | "favorite", slot: number, gameId: string): void {
   const state = useGame.getState();
   if (!state.hubReady || state.location.type !== "hub") {
@@ -155,14 +171,17 @@ export function localEnter(source: "path" | "favorite", slot: number, gameId: st
     state.setNotice("That door is closed");
     return;
   }
-  state.setLocation({ type: "game", gameId, instanceId: `local:${gameId}` });
-  if (gameId === "lane-rush") {
-    state.setNotice("Lane Rush — Enter to start · Return in HUD to leave");
-  } else if (gameId === "sky-escort") {
-    state.setNotice("Sky Escort — pick a seat · Return in HUD to leave");
-  } else {
-    state.setNotice("Hold E at the return door to leave");
+  enterGameRoom(gameId);
+}
+
+/** Solo/dev shortcut — skip cabinet proximity (e.g. `?enter=sky-escort`). */
+export function localEnterDirect(gameId: string): void {
+  const state = useGame.getState();
+  if (!state.hubReady) {
+    state.setNotice("Hub still loading");
+    return;
   }
+  enterGameRoom(gameId);
 }
 
 export function localLeave(): void {

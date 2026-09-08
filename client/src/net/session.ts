@@ -4,6 +4,7 @@ import { hasMultiplayerHub, loadRuntimeConfig } from "./config.ts";
 import {
   localChat,
   localEnter,
+  localEnterDirect,
   localLeave,
   localLoopComplete,
   localPin,
@@ -83,6 +84,11 @@ export function emitLoopComplete(): void {
 export function emitEnter(source: "path" | "favorite", slot: number, gameId: string): void {
   if (localMode()) localEnter(source, slot, gameId);
   else remoteEnter(source, slot, gameId);
+}
+
+/** Solo shortcut used by `?enter=<gameId>` deep links. */
+export function emitEnterDirect(gameId: string): void {
+  if (localMode()) localEnterDirect(gameId);
 }
 
 export function emitLeave(): void {

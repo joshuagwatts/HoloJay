@@ -5,11 +5,13 @@ import { Hud } from "./ui/Hud.tsx";
 import { Realm } from "./world/Realm.tsx";
 import { clearToken, me, rememberGuest, savedToken, saveToken } from "./auth/api.ts";
 import { clearHubOverride } from "./net/config.ts";
-import { loadRuntimeConfig, startLocal } from "./net/session.ts";
+import { loadRuntimeConfig, startLocal, emitEnterDirect } from "./net/session.ts";
 import { useGame } from "./state/store.ts";
+import { gameById } from "@holojay/shared";
 
 export function App() {
   const user = useGame((s) => s.user);
+  const hubReady = useGame((s) => s.hubReady);
   const [booting, setBooting] = useState(true);
 
   useEffect(() => {
@@ -54,6 +56,23 @@ export function App() {
       window.clearTimeout(hardCap);
     };
   }, []);
+
+  // Solo deep link: `?enter=sky-escort` (optional `&skyRadar=1` / `&skyIntro=1` for QA).
+  useEffect(() => {
+    if (!user || !hubReady) return;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const enter = params.get("enter");
+      if (!enter || !gameById(enter)) return;
+      if (useGame.getState().location.type === "game") return;
+      emitEnterDirect(enter);
+      params.delete("enter");
+      const next = `${window.location.pathname}${params.toString() ? `?${params}` : ""}${window.location.hash}`;
+      window.history.replaceState({}, "", next);
+    } catch {
+      /* ignore */
+    }
+  }, [user, hubReady]);
 
   if (booting) {
     return (
