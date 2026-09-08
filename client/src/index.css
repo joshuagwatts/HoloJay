@@ -713,12 +713,13 @@ kbd {
 .sky-escort-intro {
   position: fixed;
   inset: 0;
-  z-index: 9999;
+  z-index: 10040;
   display: grid;
   place-content: center;
   gap: 10px;
   text-align: center;
-  background: radial-gradient(ellipse at center, rgba(40, 18, 8, 0.94) 0%, rgba(6, 3, 2, 0.98) 70%);
+  /* Let the 3D flyover read through — titles sit on a soft veil, not a blackout */
+  background: radial-gradient(ellipse at center, rgba(18, 8, 4, 0.42) 0%, rgba(6, 3, 2, 0.62) 78%);
   overflow: hidden;
   pointer-events: none;
   animation: sky-intro-in 0.45s ease-out both;
@@ -817,7 +818,7 @@ kbd {
   height: 100%;
   width: 40%;
   background: linear-gradient(90deg, #ff7043, #ffd54f);
-  animation: sky-intro-bar 2.8s ease-in-out forwards;
+  animation: sky-intro-bar 3.2s ease-in-out forwards;
 }
 
 @keyframes sky-intro-in {

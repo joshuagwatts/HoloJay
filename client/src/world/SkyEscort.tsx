@@ -971,23 +971,35 @@ export function SkyEscort({ color }: { color: string }) {
     setPausedBoth(false);
     const next = levelIdxRef.current + 1;
     const nextL = makeLevel(next);
-    // Freeze on the pad
     speed.current = 0;
     falling.current = false;
     keys.current = { throttle: 0, steer: 0 };
     fireHeld.current = false;
     lookQ.current.x = 0;
     lookQ.current.y = 0;
-    const g = pathAt(1);
-    x.current = g.x;
-    z.current = g.z;
-    y.current = g.y + 0.85;
-    introT.current = 2.6;
-    introSkipLock.current = 1.2;
+    introT.current = 3.2;
+    introSkipLock.current = 1.0;
     introNextRef.current = next;
     setIntroLevel({ idx: next, name: nextL.name });
     addScore(hullRef.current * 50 + 200, `GATE +${hullRef.current * 50 + 200}`);
     playSfx("gate");
+
+    // Load the NEXT sector so the motion graphic flies the new route — not a blank gate stare.
+    setLevel(next);
+    craters.current = [];
+    meteors.current = [];
+    aliens.current = [];
+    bullets.current = [];
+    blasts.current = [];
+    groundDirty.current = true;
+    buildTerrain();
+    const start = pathAt(0);
+    x.current = start.x;
+    z.current = start.z;
+    y.current = start.y + 0.85;
+    yaw.current = start.yaw;
+    gunYaw.current = start.yaw;
+
     setPhaseBoth("intro");
     document.exitPointerLock?.();
     emitMinigame(instanceId, "sky-escort", {
@@ -1155,6 +1167,25 @@ export function SkyEscort({ color }: { color: string }) {
     const root = gunHudRoot.current;
     if (!root) return;
 
+    // Level motion-graphic titles — body-mounted so drei Html transforms can't hide them.
+    if (phase === "intro" && introLevel) {
+      root.render(
+        <div className="sky-escort-intro" aria-live="polite">
+          <div className="sky-escort-intro-scan" />
+          <div className="sky-escort-intro-glow" />
+          <p className="sky-escort-intro-kicker">Next sector</p>
+          <p className="sky-escort-intro-num">LEVEL {introLevel.idx + 1}</p>
+          <h2 className="sky-escort-intro-name">{introLevel.name}</h2>
+          <p className="sky-escort-intro-sub">Sector locked — choose your upgrade next</p>
+          <p className="sky-escort-intro-hint">Hold tight · Enter skips after lock</p>
+          <div className="sky-escort-intro-bar">
+            <span />
+          </div>
+        </div>,
+      );
+      return;
+    }
+
     // Between-level upgrade pick — must sit outside drei Html so clicks always work.
     if (phase === "upgrade") {
       root.render(
@@ -1213,7 +1244,7 @@ export function SkyEscort({ color }: { color: string }) {
     }
 
     root.render(null);
-  }, [phase, seat, hitFlash, upgradeChoices, isHost, solo, hull, score, hudDist, loadoutHud, clearBanner, failCue]);
+  }, [phase, seat, hitFlash, upgradeChoices, isHost, solo, hull, score, hudDist, loadoutHud, clearBanner, failCue, introLevel]);
 
   useEffect(() => {
     document.exitPointerLock?.();
@@ -1407,10 +1438,23 @@ export function SkyEscort({ color }: { color: string }) {
           const L = makeLevel(idx);
           introNextRef.current = idx;
           setIntroLevel({ idx, name: L.name });
-          introT.current = 2.6;
-          introSkipLock.current = 1.2;
+          introT.current = 3.2;
+          introSkipLock.current = 1.0;
           advancing.current = true;
           setPausedBoth(false);
+          setLevel(idx);
+          craters.current = [];
+          meteors.current = [];
+          aliens.current = [];
+          bullets.current = [];
+          blasts.current = [];
+          groundDirty.current = true;
+          buildTerrain();
+          const start = pathAt(0);
+          x.current = start.x;
+          z.current = start.z;
+          y.current = start.y + 0.85;
+          yaw.current = start.yaw;
           setPhaseBoth("intro");
         }
         if (data.phase === "upgrade" && !isHost) {
@@ -2143,21 +2187,46 @@ export function SkyEscort({ color }: { color: string }) {
     const oy = (Math.random() - 0.5) * sh;
     const persp = camera as THREE.PerspectiveCamera;
 
-    // Level motion graphic: shared cinematic for BOTH seats (not turret POV).
-    if (phaseRef.current === "intro" || phaseRef.current === "upgrade") {
+    // Level motion graphic: fly the NEXT sector ribbon (not a static gate stare).
+    if (phaseRef.current === "intro") {
       camera.layers.mask = 0xffffffff;
       if (fpGun.current) fpGun.current.visible = false;
-      const tx = x.current - Math.sin(yaw.current) * 16;
-      const ty = y.current + 9.5;
-      const tz = z.current - Math.cos(yaw.current) * 16;
+      if (buggy.current) buggy.current.visible = false;
+      const dur = 3.2;
+      const u = 1 - Math.max(0, introT.current) / dur;
+      const ease = u * u * (3 - 2 * u);
+      const tCam = 0.02 + ease * 0.64;
+      const here = pathAt(tCam);
+      const ahead = pathAt(Math.min(1, tCam + 0.11));
+      const side = Math.sin(ease * Math.PI) * 7.5;
+      const back = 13 - ease * 3.5;
+      camera.position.set(
+        here.x - Math.sin(here.yaw) * back + Math.cos(here.yaw) * side,
+        here.y + 6.2 + Math.sin(ease * Math.PI) * 5.2,
+        here.z - Math.cos(here.yaw) * back - Math.sin(here.yaw) * side,
+      );
+      camera.lookAt(ahead.x, ahead.y + 1.35, ahead.z);
+      if (persp.isPerspectiveCamera) {
+        persp.fov = 56 + ease * 6;
+        persp.near = 0.1;
+        persp.updateProjectionMatrix();
+      }
+    } else if (phaseRef.current === "upgrade") {
+      camera.layers.mask = 0xffffffff;
+      if (fpGun.current) fpGun.current.visible = false;
+      if (buggy.current) buggy.current.visible = true;
+      const tx = x.current - Math.sin(yaw.current) * 14;
+      const ty = y.current + 7.5;
+      const tz = z.current - Math.cos(yaw.current) * 14;
       camera.position.set(tx, ty, tz);
-      camera.lookAt(x.current, y.current + 1.2, z.current - Math.cos(yaw.current) * 8);
+      camera.lookAt(x.current + Math.sin(yaw.current) * 10, y.current + 1.0, z.current + Math.cos(yaw.current) * 10);
       if (persp.isPerspectiveCamera) {
         persp.fov = 58;
         persp.updateProjectionMatrix();
       }
     } else if (seatRef.current === "gunner" && phaseRef.current === "run" && !pausedRef.current) {
       // Gunner free-look: cheek-weld behind the turret; aim is pure world yaw/pitch.
+      if (buggy.current) buggy.current.visible = true;
       const t = turretWorld();
       const cy = Math.cos(gunYaw.current);
       const sy = Math.sin(gunYaw.current);
@@ -2191,6 +2260,7 @@ export function SkyEscort({ color }: { color: string }) {
     } else {
       camera.layers.mask = 0xffffffff;
       if (fpGun.current) fpGun.current.visible = false;
+      if (buggy.current) buggy.current.visible = true;
       if (persp.isPerspectiveCamera) {
         const boosting = boostTimer.current > 0 || fovKick.current > 0;
         const want = phaseRef.current === "ready" ? 58 : boosting ? 74 : 58;
@@ -2445,20 +2515,6 @@ export function SkyEscort({ color }: { color: string }) {
         style={{ pointerEvents: phase === "ready" || paused ? "auto" : "none" }}
       >
         <div className="sky-escort-hud">
-          {phase === "intro" && introLevel && (
-            <div className="sky-escort-intro" aria-live="polite">
-              <div className="sky-escort-intro-scan" />
-              <div className="sky-escort-intro-glow" />
-              <p className="sky-escort-intro-kicker">Next sector</p>
-              <p className="sky-escort-intro-num">LEVEL {introLevel.idx + 1}</p>
-              <h2 className="sky-escort-intro-name">{introLevel.name}</h2>
-              <p className="sky-escort-intro-sub">Sector locked — choose your upgrade next</p>
-              <p className="sky-escort-intro-hint">Hold tight · Enter skips after lock</p>
-              <div className="sky-escort-intro-bar">
-                <span />
-              </div>
-            </div>
-          )}
           {paused && phase === "run" && (
             <div className="sky-escort-pause" aria-live="polite">
               <p className="sky-escort-pause-kicker">Paused</p>
