@@ -1477,6 +1477,19 @@ export function SkyEscort({ color }: { color: string }) {
   }, [skyQa.radar]);
 
   useEffect(() => {
+    if (!skyQa.intro) return;
+    const t = window.setTimeout(() => {
+      if (phaseRef.current !== "ready" && phaseRef.current !== "run") return;
+      if (phaseRef.current === "ready") {
+        phaseRef.current = "run";
+        setPhase("run");
+      }
+      if (!advancing.current) beginAdvance();
+    }, 700);
+    return () => window.clearTimeout(t);
+  }, [skyQa.intro]);
+
+  useEffect(() => {
     const others = Object.values(players).filter((p) => p.id !== selfId);
     if (instanceId.startsWith("local:") || offline || others.length === 0) {
       driverIdRef.current = seat === "driver" ? selfId : "ai";
