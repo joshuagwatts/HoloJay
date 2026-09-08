@@ -1952,37 +1952,41 @@ export function SkyEscort({ color }: { color: string }) {
         </group>
       </group>
 
-      {/* FP turret — chunky barrel filling the lower frame so you always see the gun. */}
+      {/* FP turret — camera looks down -Z; barrel must extend that way (muzzle away from face). */}
       <group ref={fpGun} visible={false}>
-        <mesh position={[0, 0.12, -0.05]}>
-          <boxGeometry args={[0.06, 0.1, 0.06]} />
+        {/* iron bead */}
+        <mesh position={[0, 0.1, -0.55]}>
+          <boxGeometry args={[0.05, 0.09, 0.05]} />
           <meshBasicMaterial color="#ffab40" />
         </mesh>
-        <mesh position={[0, -0.08, 0.15]}>
-          <boxGeometry args={[0.55, 0.28, 0.7]} />
+        {/* receiver / breech near the camera */}
+        <mesh position={[0, -0.08, 0.35]}>
+          <boxGeometry args={[0.58, 0.3, 0.75]} />
           <meshStandardMaterial color="#cfd8dc" metalness={0.75} roughness={0.3} emissive="#455a64" emissiveIntensity={0.25} />
         </mesh>
-        <mesh position={[-0.38, -0.02, 0.05]}>
-          <boxGeometry args={[0.12, 0.35, 0.45]} />
+        <mesh position={[-0.4, -0.02, 0.25]}>
+          <boxGeometry args={[0.12, 0.35, 0.5]} />
           <meshStandardMaterial color="#5d4037" metalness={0.5} roughness={0.45} />
         </mesh>
-        <mesh position={[0.38, -0.02, 0.05]}>
-          <boxGeometry args={[0.12, 0.35, 0.45]} />
+        <mesh position={[0.4, -0.02, 0.25]}>
+          <boxGeometry args={[0.12, 0.35, 0.5]} />
           <meshStandardMaterial color="#5d4037" metalness={0.5} roughness={0.45} />
         </mesh>
-        <mesh position={[0, -0.06, -1.15]} rotation={[Math.PI / 2, 0, 0]}>
-          <cylinderGeometry args={[0.09, 0.12, 2.1, 10]} />
+        {/* barrel: -PI/2 puts cylinder +Y (narrow tip) toward camera -Z / into the world */}
+        <mesh position={[0, -0.06, -1.05]} rotation={[-Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.08, 0.12, 2.2, 10]} />
           <meshStandardMaterial color="#eceff1" metalness={0.9} roughness={0.18} emissive="#90a4ae" emissiveIntensity={0.35} />
         </mesh>
-        <mesh position={[0, -0.06, -2.15]} rotation={[Math.PI / 2, 0, 0]}>
-          <cylinderGeometry args={[0.14, 0.1, 0.28, 10]} />
+        {/* muzzle brake furthest down the sights */}
+        <mesh position={[0, -0.06, -2.2]} rotation={[-Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.13, 0.09, 0.28, 10]} />
           <meshStandardMaterial color="#ffab40" emissive="#ff6d00" emissiveIntensity={1.4} metalness={0.6} />
         </mesh>
-        <mesh position={[0, -0.28, 0.05]}>
-          <boxGeometry args={[0.18, 0.22, 0.35]} />
+        <mesh position={[0, -0.3, 0.2]}>
+          <boxGeometry args={[0.18, 0.22, 0.4]} />
           <meshStandardMaterial color="#3e2723" roughness={0.7} />
         </mesh>
-        <pointLight position={[0, 0.05, -0.8]} color="#ffab40" intensity={2.2} distance={4} />
+        <pointLight position={[0, 0.05, -0.9]} color="#ffab40" intensity={2.2} distance={4} />
       </group>
 
       <Html fullscreen zIndexRange={[100, 0]} style={{ pointerEvents: phase === "ready" ? "auto" : "none" }}>
