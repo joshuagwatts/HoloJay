@@ -925,13 +925,13 @@ kbd {
 .sky-escort-crosshair {
   position: absolute;
   left: 50%;
-  top: 44%;
-  width: 36px;
-  height: 36px;
+  top: 42%;
+  width: 40px;
+  height: 40px;
   translate: -50% -50%;
   pointer-events: none;
   z-index: 5;
-  opacity: 0.9;
+  opacity: 0.95;
 }
 
 .sky-escort-crosshair-h,
@@ -981,85 +981,94 @@ kbd {
   box-shadow: 0 0 14px rgba(255, 213, 79, 0.95);
 }
 
-/* Always-on gunner barrel silhouette (HUD) — cannot vanish with WebGL quirks */
+/* Always-on gunner barrel — portaled to document.body (not inside drei Html) */
+.sky-escort-gun-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 40;
+}
+
 .sky-escort-viewmodel {
   position: absolute;
   left: 50%;
   bottom: 0;
-  width: min(72vw, 520px);
-  height: min(42vh, 340px);
+  width: min(640px, 78vw);
+  height: min(52vh, 420px);
   translate: -50% 0;
   pointer-events: none;
-  z-index: 4;
-  filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.55));
 }
 
 .sky-escort-viewmodel-receiver {
   position: absolute;
   left: 50%;
-  bottom: 8%;
-  width: 38%;
-  height: 28%;
+  bottom: 0;
+  width: 46%;
+  height: 26%;
   translate: -50% 0;
-  background: linear-gradient(180deg, #cfd8dc 0%, #78909c 55%, #546e7a 100%);
-  border-radius: 10px 10px 6px 6px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: linear-gradient(180deg, #dce4e8 0%, #90a4ae 42%, #607d8b 100%);
+  border-radius: 14px 14px 0 0;
+  border: 2px solid rgba(255, 255, 255, 0.28);
+  box-shadow: inset 0 8px 16px rgba(255, 255, 255, 0.12);
 }
 
 .sky-escort-viewmodel-cheek {
   position: absolute;
-  bottom: 10%;
-  width: 14%;
-  height: 34%;
-  background: linear-gradient(180deg, #8d6e63 0%, #5d4037 100%);
-  border-radius: 8px;
-  border: 1px solid rgba(0, 0, 0, 0.35);
+  bottom: 2%;
+  width: 18%;
+  height: 40%;
+  background: linear-gradient(180deg, #a1887f 0%, #5d4037 55%, #3e2723 100%);
+  border-radius: 12px 12px 4px 4px;
+  border: 2px solid rgba(0, 0, 0, 0.35);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.45);
 }
 
 .sky-escort-viewmodel-cheek.left {
-  left: 22%;
-  transform: skewX(-6deg);
+  left: 14%;
+  transform: perspective(240px) rotateY(18deg) skewX(-4deg);
 }
 
 .sky-escort-viewmodel-cheek.right {
-  right: 22%;
-  transform: skewX(6deg);
+  right: 14%;
+  transform: perspective(240px) rotateY(-18deg) skewX(4deg);
 }
 
 .sky-escort-viewmodel-barrel {
   position: absolute;
   left: 50%;
-  bottom: 30%;
-  width: 7.5%;
-  height: 58%;
+  bottom: 22%;
+  width: 56px;
+  height: 62%;
   translate: -50% 0;
-  background: linear-gradient(90deg, #90a4ae 0%, #eceff1 45%, #78909c 100%);
+  background: linear-gradient(90deg, #78909c 0%, #f5f7fa 48%, #90a4ae 100%);
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 0 0 3px rgba(38, 50, 56, 0.35), 0 12px 28px rgba(0, 0, 0, 0.4);
 }
 
 .sky-escort-viewmodel-muzzle {
   position: absolute;
   left: 50%;
-  top: 6%;
-  width: 11%;
-  height: 10%;
+  top: 2%;
+  width: 78px;
+  height: 54px;
   translate: -50% 0;
-  background: radial-gradient(circle at 50% 40%, #ffd54f 0%, #ffab40 55%, #ef6c00 100%);
+  background: radial-gradient(circle at 50% 40%, #ffe082 0%, #ffab40 50%, #ef6c00 100%);
   border-radius: 999px;
-  box-shadow: 0 0 12px rgba(255, 145, 0, 0.65);
+  border: 2px solid rgba(255, 224, 130, 0.65);
+  box-shadow: 0 0 18px rgba(255, 145, 0, 0.75);
 }
 
 .sky-escort-viewmodel-bead {
   position: absolute;
   left: 50%;
-  top: 18%;
-  width: 10px;
-  height: 10px;
+  top: 16%;
+  width: 12px;
+  height: 12px;
   translate: -50% 0;
-  background: #ffe082;
+  background: #fff8e1;
   border-radius: 50%;
-  box-shadow: 0 0 8px rgba(255, 224, 130, 0.9);
+  box-shadow: 0 0 10px rgba(255, 224, 130, 1);
 }
 
 .sky-escort-pause,

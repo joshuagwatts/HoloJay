@@ -2269,6 +2269,27 @@ export function SkyEscort({ color }: { color: string }) {
           </div>
         </div>
       </Html>
+      {typeof document !== "undefined" &&
+        phase === "run" &&
+        seat === "gunner" &&
+        createPortal(
+          <div className="sky-escort-gun-overlay" aria-hidden>
+            <div className={`sky-escort-crosshair${hitFlash ? " hit" : ""}`}>
+              <span className="sky-escort-crosshair-ring" />
+              <span className="sky-escort-crosshair-h" />
+              <span className="sky-escort-crosshair-v" />
+            </div>
+            <div className="sky-escort-viewmodel">
+              <div className="sky-escort-viewmodel-cheek left" />
+              <div className="sky-escort-viewmodel-cheek right" />
+              <div className="sky-escort-viewmodel-receiver" />
+              <div className="sky-escort-viewmodel-barrel" />
+              <div className="sky-escort-viewmodel-muzzle" />
+              <div className="sky-escort-viewmodel-bead" />
+            </div>
+          </div>,
+          document.body,
+        )}
     </group>
   );
 }
