@@ -1,6 +1,7 @@
 import { Html } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import * as THREE from "three";
 import { emitMinigame, onMinigame } from "../net/session.ts";
 import { useGame } from "../state/store.ts";
@@ -2187,24 +2188,6 @@ export function SkyEscort({ color }: { color: string }) {
               <p className="sky-escort-dead-sub">Truck cooked — dive ship got you</p>
               <p className="sky-escort-dead-hint">Space / R / Enter to retry</p>
             </div>
-          )}
-          {phase === "run" && seat === "gunner" && (
-            <>
-              <div className={`sky-escort-crosshair${hitFlash ? " hit" : ""}`} aria-hidden>
-                <span className="sky-escort-crosshair-ring" />
-                <span className="sky-escort-crosshair-h" />
-                <span className="sky-escort-crosshair-v" />
-              </div>
-              {/* CSS barrel always visible — cannot fail with WebGL layers/culling. */}
-              <div className="sky-escort-viewmodel" aria-hidden>
-                <div className="sky-escort-viewmodel-cheek left" />
-                <div className="sky-escort-viewmodel-cheek right" />
-                <div className="sky-escort-viewmodel-receiver" />
-                <div className="sky-escort-viewmodel-barrel" />
-                <div className="sky-escort-viewmodel-muzzle" />
-                <div className="sky-escort-viewmodel-bead" />
-              </div>
-            </>
           )}
           <div
             className="sky-escort-card"
