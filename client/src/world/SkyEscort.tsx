@@ -385,7 +385,7 @@ const UPGRADE_LABEL: Record<UpgradeId, string> = {
 const UPGRADE_BLURB: Record<UpgradeId, string> = {
   boost: "Extra Shift boost charge for the next sectors",
   armor: "+1 max hull — tank one more hit",
-  radar: "Paint dive ships and meteors in the sky",
+  radar: "HUD scope + sky pings on every rock & dive ship",
   turret: "Faster bed-gun fire rate",
   shield: "Absorb one hit in a glowing bubble",
   twin: "Second barrel — fire two bolts at once",
@@ -457,9 +457,84 @@ function syncGroup<T>(
   while (group.children.length > items.length) {
     const last = group.children[group.children.length - 1] as THREE.Mesh;
     group.remove(last);
-    last.geometry.dispose();
+    last.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.geometry) m.geometry.dispose();
+    });
   }
   items.forEach((item, i) => apply(item, group.children[i] as THREE.Mesh));
+}
+
+/** Sky marker so Threat Radar is obvious — not just a tiny emissive bump. */
+function attachRadarPing(mesh: THREE.Mesh, color: string) {
+  const ping = new THREE.Group();
+  ping.name = "radarPing";
+  ping.visible = false;
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.42, 0.62, 22),
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.95,
+      side: THREE.DoubleSide,
+      depthTest: false,
+    }),
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.renderOrder = 12;
+  const tip = new THREE.Mesh(
+    new THREE.OctahedronGeometry(0.3, 0),
+    new THREE.MeshBasicMaterial({ color: "#ffe082", depthTest: false }),
+  );
+  tip.position.y = 0.22;
+  tip.renderOrder = 13;
+  const beam = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.045, 0.045, 1.7, 5),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.6, depthTest: false }),
+  );
+  beam.position.y = -0.75;
+  beam.renderOrder = 11;
+  ping.add(beam, ring, tip);
+  ping.position.y = 1.65;
+  mesh.add(ping);
+  return mesh;
+}
+
+function setRadarPing(mesh: THREE.Mesh, on: boolean, id: number) {
+  const ping = mesh.getObjectByName("radarPing") as THREE.Group | undefined;
+  if (!ping) return;
+  ping.visible = on;
+  if (!on) return;
+  const t = performance.now() * 0.01;
+  const pulse = 1 + Math.sin(t + id) * 0.22;
+  // Counter parent non-uniform scale so sky markers stay readable on dive ships.
+  const sx = Math.max(0.001, mesh.scale.x);
+  const sy = Math.max(0.001, mesh.scale.y);
+  const sz = Math.max(0.001, mesh.scale.z);
+  ping.scale.set(pulse / sx, pulse / sy, pulse / sz);
+  ping.rotation.y = t * 0.35;
+}
+
+type RadarBlip = { id: number; kind: "meteor" | "alien"; nx: number; nz: number };
+
+function ThreatRadarScope({ blips }: { blips: RadarBlip[] }) {
+  return (
+    <div className="sky-escort-radar" aria-label="Threat radar">
+      <div className="sky-escort-radar-ring" />
+      <div className="sky-escort-radar-ring mid" />
+      <div className="sky-escort-radar-cross h" />
+      <div className="sky-escort-radar-cross v" />
+      <div className="sky-escort-radar-sweep" />
+      <span className="sky-escort-radar-label">THREAT RADAR</span>
+      {blips.map((b) => (
+        <i
+          key={`${b.kind}-${b.id}`}
+          className={`sky-escort-radar-blip ${b.kind}`}
+          style={{ left: `${50 + b.nx * 46}%`, top: `${50 - b.nz * 46}%` }}
+        />
+      ))}
+    </div>
+  );
 }
 
 export function SkyEscort({ color }: { color: string }) {
@@ -501,6 +576,8 @@ export function SkyEscort({ color }: { color: string }) {
   const advancing = useRef(false);
   const loadout = useRef<Loadout>(DEFAULT_LOADOUT());
   const [loadoutHud, setLoadoutHud] = useState<Loadout>(DEFAULT_LOADOUT());
+  const [radarBlips, setRadarBlips] = useState<RadarBlip[]>([]);
+  const radarBlipsOn = useRef(false);
   const pickups = useRef<Pickup[]>([]);
   const boostTimer = useRef(0);
   const pickupGroup = useRef<THREE.Group>(null);
@@ -1261,7 +1338,7 @@ export function SkyEscort({ color }: { color: string }) {
         <div className="sky-escort-intro" aria-live="polite">
           <div className="sky-escort-intro-scan" />
           <div className="sky-escort-intro-glow" />
-          <p className="sky-escort-intro-kicker">Next sector</p>
+          <p className="sky-escort-intro-kicker">Sector unlocked</p>
           <p className="sky-escort-intro-num">LEVEL {introLevel.idx + 1}</p>
           <h2 className="sky-escort-intro-name">{introLevel.name}</h2>
           <p className="sky-escort-intro-sub">
@@ -1271,7 +1348,7 @@ export function SkyEscort({ color }: { color: string }) {
                 ? "Dive-ship sector — man the turret"
                 : "Mixed threats — rocks and ships"}
           </p>
-          <p className="sky-escort-intro-hint">Hold tight · Enter skips after lock</p>
+          <p className="sky-escort-intro-hint">Hold tight · Enter skips</p>
           <div className="sky-escort-intro-bar">
             <span />
           </div>
@@ -1313,32 +1390,55 @@ export function SkyEscort({ color }: { color: string }) {
       return;
     }
 
-    // Gunner: crosshair + thin vitals only (no fat card / no 2D gun).
-    if (phase === "run" && seat === "gunner") {
-      root.render(
-        <div className="sky-escort-gun-overlay" aria-hidden>
-          <div className={`sky-escort-crosshair${hitFlash ? " hit" : ""}`}>
-            <span className="sky-escort-crosshair-ring" />
-            <span className="sky-escort-crosshair-h" />
-            <span className="sky-escort-crosshair-v" />
-          </div>
-          <div className="sky-escort-vitals">
-            <span>
-              {"♥".repeat(hull)}
-              {"♡".repeat(Math.max(0, activeLevel().hull + loadoutHud.armorBonus - hull))}
-            </span>
-            <span>{score}</span>
-            <span>{hudDist}m</span>
-            {clearBanner ? <span className="sky-escort-vitals-alert">{clearBanner}</span> : null}
-            {failCue ? <span className="sky-escort-vitals-alert">IMPACT</span> : null}
-          </div>
-        </div>,
-      );
-      return;
+    // Gunner: crosshair + thin vitals. Driver/gunner both get Threat Radar HUD when equipped.
+    if (phase === "run") {
+      const radarHud = loadoutHud.radar ? <ThreatRadarScope blips={radarBlips} /> : null;
+      if (seat === "gunner") {
+        root.render(
+          <div className="sky-escort-gun-overlay" aria-hidden>
+            <div className={`sky-escort-crosshair${hitFlash ? " hit" : ""}`}>
+              <span className="sky-escort-crosshair-ring" />
+              <span className="sky-escort-crosshair-h" />
+              <span className="sky-escort-crosshair-v" />
+            </div>
+            <div className="sky-escort-vitals">
+              <span>
+                {"♥".repeat(hull)}
+                {"♡".repeat(Math.max(0, activeLevel().hull + loadoutHud.armorBonus - hull))}
+              </span>
+              <span>{score}</span>
+              <span>{hudDist}m</span>
+              {clearBanner ? <span className="sky-escort-vitals-alert">{clearBanner}</span> : null}
+              {failCue ? <span className="sky-escort-vitals-alert">IMPACT</span> : null}
+            </div>
+            {radarHud}
+          </div>,
+        );
+        return;
+      }
+      if (radarHud) {
+        root.render(<div className="sky-escort-gun-overlay">{radarHud}</div>);
+        return;
+      }
     }
 
     root.render(null);
-  }, [phase, seat, hitFlash, upgradeChoices, isHost, solo, hull, score, hudDist, loadoutHud, clearBanner, failCue, introLevel]);
+  }, [
+    phase,
+    seat,
+    hitFlash,
+    upgradeChoices,
+    isHost,
+    solo,
+    hull,
+    score,
+    hudDist,
+    loadoutHud,
+    clearBanner,
+    failCue,
+    introLevel,
+    radarBlips,
+  ]);
 
   useEffect(() => {
     document.exitPointerLock?.();
@@ -1622,6 +1722,36 @@ export function SkyEscort({ color }: { color: string }) {
       hudAcc.current = 0;
       const gate = pathAt(1);
       setHudDist(Math.max(0, Math.floor(Math.hypot(gate.x - x.current, gate.z - z.current))));
+      if (loadout.current.radar && phaseRef.current === "run") {
+        const range = 58;
+        const sy = Math.sin(yaw.current);
+        const cy = Math.cos(yaw.current);
+        const next: RadarBlip[] = [];
+        for (const m of meteors.current) {
+          if (m.y < -5) continue;
+          const dx = m.x - x.current;
+          const dz = m.z - z.current;
+          const localX = dx * cy - dz * sy;
+          const localZ = dx * sy + dz * cy;
+          const d = Math.hypot(localX, localZ);
+          if (d > range) continue;
+          next.push({ id: m.id, kind: "meteor", nx: localX / range, nz: localZ / range });
+        }
+        for (const a of aliens.current) {
+          const dx = a.x - x.current;
+          const dz = a.z - z.current;
+          const localX = dx * cy - dz * sy;
+          const localZ = dx * sy + dz * cy;
+          const d = Math.hypot(localX, localZ);
+          if (d > range) continue;
+          next.push({ id: a.id, kind: "alien", nx: localX / range, nz: localZ / range });
+        }
+        radarBlipsOn.current = true;
+        setRadarBlips(next);
+      } else if (radarBlipsOn.current) {
+        radarBlipsOn.current = false;
+        setRadarBlips([]);
+      }
     }
 
     if (failCueT.current > 0) {
@@ -2162,15 +2292,19 @@ export function SkyEscort({ color }: { color: string }) {
         mesh.visible = m.y > -10;
         mesh.position.set(m.x, m.y, m.z);
         const mat = mesh.material as THREE.MeshStandardMaterial;
-        if (loadout.current.radar) {
-          mat.emissiveIntensity = 1.8 + Math.sin(performance.now() * 0.012 + m.id) * 0.4;
-          mat.emissive.set("#ff6d00");
+        const radarOn = loadout.current.radar;
+        setRadarPing(mesh, radarOn && m.y > -10, m.id);
+        if (radarOn) {
+          mat.emissiveIntensity = 2.4 + Math.sin(performance.now() * 0.012 + m.id) * 0.55;
+          mat.emissive.set("#ff9100");
+          mat.color.set("#ffcc80");
         } else {
           mat.emissiveIntensity = 0.55;
           mat.emissive.set("#ff6d00");
+          mat.color.set("#5c4030");
         }
       },
-      () => new THREE.Mesh(new THREE.DodecahedronGeometry(0.55), mats.meteor.clone()),
+      () => attachRadarPing(new THREE.Mesh(new THREE.DodecahedronGeometry(0.55), mats.meteor.clone()), "#ff6d00"),
     );
 
     syncGroup(
@@ -2187,31 +2321,40 @@ export function SkyEscort({ color }: { color: string }) {
         const stretch = a.mode === "dive" ? 1.55 : a.mode === "feint" ? 1.35 : 1.25;
         mesh.scale.set(1.05 * pulse, 0.75 * pulse, stretch * pulse);
         const mat = mesh.material as THREE.MeshStandardMaterial;
-        if (loadout.current.radar) {
-          mat.emissiveIntensity = 2.4 + Math.sin(performance.now() * 0.02 + a.id) * 0.6;
+        const radarOn = loadout.current.radar;
+        setRadarPing(mesh, radarOn, a.id);
+        if (radarOn) {
+          mat.emissiveIntensity = 3.1 + Math.sin(performance.now() * 0.02 + a.id) * 0.7;
           mat.emissive.set("#ffab40");
+          mat.color.set("#ffe082");
         } else if (a.mode === "feint") {
           mat.emissiveIntensity = 1.5;
           mat.emissive.set("#ff80ab");
+          mat.color.set("#7cfcff");
         } else if (a.mode === "bank") {
           mat.emissiveIntensity = 1.35;
           mat.emissive.set("#b388ff");
+          mat.color.set("#7cfcff");
         } else {
           mat.emissiveIntensity = 1.15;
           mat.emissive.set("#00e5ff");
+          mat.color.set("#7cfcff");
         }
       },
       () =>
-        new THREE.Mesh(
-          new THREE.OctahedronGeometry(0.7, 0),
-          new THREE.MeshStandardMaterial({
-            color: "#7cfcff",
-            emissive: "#00e5ff",
-            emissiveIntensity: 1.6,
-            metalness: 0.35,
-            roughness: 0.35,
-            flatShading: true,
-          }),
+        attachRadarPing(
+          new THREE.Mesh(
+            new THREE.OctahedronGeometry(0.7, 0),
+            new THREE.MeshStandardMaterial({
+              color: "#7cfcff",
+              emissive: "#00e5ff",
+              emissiveIntensity: 1.6,
+              metalness: 0.35,
+              roughness: 0.35,
+              flatShading: true,
+            }),
+          ),
+          "#40c4ff",
         ),
     );
 
@@ -2805,7 +2948,7 @@ export function SkyEscort({ color }: { color: string }) {
                 <p className="sky-escort-hint">
                   {seat === "driver"
                     ? "WASD · Shift boost · Esc pause · stay on the ribbon"
-                    : "Mouse free-look · hold fire · Esc pause · radar paints threats"}
+                    : "Mouse free-look · hold fire · Esc pause · radar = HUD + sky pings"}
                 </p>
               </>
             )}

@@ -1011,6 +1011,112 @@ kbd {
   text-transform: uppercase;
 }
 
+/* Threat radar — corner scope with live blips */
+.sky-escort-radar {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  width: min(28vw, 148px);
+  height: min(28vw, 148px);
+  border-radius: 50%;
+  border: 1px solid rgba(64, 196, 255, 0.55);
+  background:
+    radial-gradient(circle at center, rgba(8, 28, 36, 0.55) 0%, rgba(4, 12, 18, 0.72) 70%),
+    repeating-radial-gradient(circle at center, transparent 0 18%, rgba(64, 196, 255, 0.08) 18% 19%);
+  box-shadow: inset 0 0 24px rgba(64, 196, 255, 0.18);
+  overflow: hidden;
+}
+
+.sky-escort-radar-ring {
+  position: absolute;
+  inset: 18%;
+  border-radius: 50%;
+  border: 1px solid rgba(64, 196, 255, 0.28);
+  pointer-events: none;
+}
+
+.sky-escort-radar-ring.mid {
+  inset: 34%;
+}
+
+.sky-escort-radar-cross {
+  position: absolute;
+  background: rgba(64, 196, 255, 0.28);
+  pointer-events: none;
+}
+
+.sky-escort-radar-cross.h {
+  left: 8%;
+  right: 8%;
+  top: 50%;
+  height: 1px;
+}
+
+.sky-escort-radar-cross.v {
+  top: 8%;
+  bottom: 8%;
+  left: 50%;
+  width: 1px;
+}
+
+.sky-escort-radar-sweep {
+  position: absolute;
+  inset: 0;
+  background: conic-gradient(from 0deg, transparent 0deg, rgba 300deg, rgba(64, 196, 255, 0.28) 360deg);
+  animation: sky-radar-sweep 2.4s linear infinite;
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+
+.sky-escort-radar-label {
+  position: absolute;
+  left: 50%;
+  top: 8px;
+  translate: -50% 0;
+  font-family: Syne, sans-serif;
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  color: rgba(128, 216, 255, 0.85);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
+}
+
+.sky-escort-radar-blip {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  margin: -3.5px 0 0 -3.5px;
+  box-shadow: 0 0 8px currentColor;
+}
+
+.sky-escort-radar-blip.meteor {
+  background: #ff9100;
+  color: #ff9100;
+  border-radius: 50%;
+  animation: sky-radar-blip 0.9s ease-in-out infinite;
+}
+
+.sky-escort-radar-blip.alien {
+  background: #40c4ff;
+  color: #40c4ff;
+  border-radius: 1px;
+  animation: sky-radar-blip-diamond 0.9s ease-in-out infinite;
+}
+
+@keyframes sky-radar-sweep {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes sky-radar-blip {
+  0%, 100% { opacity: 0.75; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.25); }
+}
+
+@keyframes sky-radar-blip-diamond {
+  0%, 100% { opacity: 0.75; transform: rotate(45deg) scale(1); }
+  50% { opacity: 1; transform: rotate(45deg) scale(1.25); }
+}
+
 .sky-escort-pause,
 .sky-escort-upgrade {
   position: fixed;
