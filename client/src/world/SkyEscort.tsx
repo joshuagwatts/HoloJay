@@ -349,7 +349,7 @@ function syncGroup<T>(
 }
 
 export function SkyEscort({ color }: { color: string }) {
-  const { camera, gl, scene } = useThree();
+  const { camera, gl } = useThree();
   const selfId = useGame((s) => s.selfId) ?? "local";
   const location = useGame((s) => s.location);
   const players = useGame((s) => s.players);
@@ -438,8 +438,8 @@ export function SkyEscort({ color }: { color: string }) {
   const buggy = useRef<THREE.Group>(null);
   const gunMount = useRef<THREE.Group>(null);
   const gunPitchMount = useRef<THREE.Group>(null);
-  /** First-person gun viewmodel — scene-synced to camera each frame (not camera-parented). */
-  const fpGun = useRef<THREE.Group | null>(null);
+  /** First-person gun viewmodel — R3F group synced to camera each frame. */
+  const fpGun = useRef<THREE.Group>(null);
   const gunPivotWorld = useRef(new THREE.Vector3());
   const gunQuatWorld = useRef(new THREE.Quaternion());
   const gunEyeLocal = useRef(new THREE.Vector3());
@@ -1001,6 +1001,25 @@ export function SkyEscort({ color }: { color: string }) {
     setPhaseBoth("run");
   }
 
+  // Viewmodel materials stay unlit + fog-immune so the barrel cannot wash out.
+  const fpGunMats = useMemo(
+    () => ({
+      steel: new THREE.MeshBasicMaterial({ color: "#e8eef2", fog: false, depthTest: false, depthWrite: false }),
+      receiver: new THREE.MeshBasicMaterial({ color: "#90a4ae", fog: false, depthTest: false, depthWrite: false }),
+      cheek: new THREE.MeshBasicMaterial({ color: "#6d4c41", fog: false, depthTest: false, depthWrite: false }),
+      grip: new THREE.MeshBasicMaterial({ color: "#3e2723", fog: false, depthTest: false, depthWrite: false }),
+      muzzle: new THREE.MeshBasicMaterial({ color: "#ffab40", fog: false, depthTest: false, depthWrite: false }),
+      bead: new THREE.MeshBasicMaterial({ color: "#ffe082", fog: false, depthTest: false, depthWrite: false }),
+    }),
+    [],
+  );
+
+  useEffect(() => {
+    return () => {
+      Object.values(fpGunMats).forEach((m) => m.dispose());
+    };
+  }, [fpGunMats]);
+
   useEffect(() => {
     document.exitPointerLock?.();
     buildTerrain();
@@ -1014,70 +1033,6 @@ export function SkyEscort({ color }: { color: string }) {
       camera.updateProjectionMatrix();
     };
   }, [camera]);
-
-  // First-person viewmodel lives in the SCENE (not parented to the camera).
-  // Camera parenting + MeshStandardMaterial kept failing to show a barrel on alpha;
-  // scene-sync + MeshBasicMaterial is always lit and always in the graph R3F renders.
-  useEffect(() => {
-    const gun = new THREE.Group();
-    gun.name = "sky-escort-fp-gun";
-    gun.visible = false;
-    gun.frustumCulled = false;
-    gun.renderOrder = 10;
-
-    // Unlit materials — cannot wash out or depend on truck/camera lights.
-    const matSteel = new THREE.MeshBasicMaterial({ color: "#e8eef2" });
-    const matReceiver = new THREE.MeshBasicMaterial({ color: "#b0bec5" });
-    const matCheek = new THREE.MeshBasicMaterial({ color: "#6d4c41" });
-    const matGrip = new THREE.MeshBasicMaterial({ color: "#3e2723" });
-    const matMuzzle = new THREE.MeshBasicMaterial({ color: "#ffab40" });
-    const matBead = new THREE.MeshBasicMaterial({ color: "#ffe082" });
-
-    const bead = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.12, 0.07), matBead);
-    bead.position.set(0, 0.16, -0.65);
-    const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.4, 0.95), matReceiver);
-    receiver.position.set(0, -0.12, 0.45);
-    const cheekL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.48, 0.7), matCheek);
-    cheekL.position.set(-0.52, -0.02, 0.32);
-    const cheekR = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.48, 0.7), matCheek);
-    cheekR.position.set(0.52, -0.02, 0.32);
-    // Camera looks down -Z; -PI/2 puts cylinder tip toward muzzle / into the world.
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.15, 2.6, 14), matSteel);
-    barrel.rotation.x = -Math.PI / 2;
-    barrel.position.set(0, -0.04, -1.25);
-    const muzzle = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.12, 0.36, 12), matMuzzle);
-    muzzle.rotation.x = -Math.PI / 2;
-    muzzle.position.set(0, -0.04, -2.55);
-    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.3, 0.5), matGrip);
-    grip.position.set(0, -0.38, 0.28);
-
-    gun.add(bead, receiver, cheekL, cheekR, barrel, muzzle, grip);
-    gun.traverse((o) => {
-      o.layers.set(0);
-      o.frustumCulled = false;
-      if (o instanceof THREE.Mesh) {
-        o.renderOrder = 10;
-        // Draw on top of nearby truck bed geo so the viewmodel never "vanishes".
-        o.material.depthTest = true;
-        o.material.depthWrite = true;
-      }
-    });
-    scene.add(gun);
-    fpGun.current = gun;
-
-    return () => {
-      scene.remove(gun);
-      gun.traverse((o) => {
-        if (o instanceof THREE.Mesh) {
-          o.geometry.dispose();
-          const m = o.material;
-          if (Array.isArray(m)) m.forEach((x) => x.dispose());
-          else m.dispose();
-        }
-      });
-      fpGun.current = null;
-    };
-  }, [scene]);
 
   useEffect(() => {
     const others = Object.values(players).filter((p) => p.id !== selfId);
@@ -1902,14 +1857,15 @@ export function SkyEscort({ color }: { color: string }) {
         persp.updateProjectionMatrix();
       }
       if (fpGun.current) {
-        // Place viewmodel in camera space without parenting (R3F-safe).
+        // Place viewmodel in camera space (R3F group, depthTest off — always on top).
         camera.updateMatrixWorld();
-        const offset = gunEyeLocal.current.set(0.06, -0.42, -0.55);
+        const offset = gunEyeLocal.current.set(0.08, -0.48, -0.62);
         offset.applyQuaternion(camera.quaternion);
         fpGun.current.visible = true;
         fpGun.current.position.copy(camera.position).add(offset);
         fpGun.current.quaternion.copy(camera.quaternion);
-        fpGun.current.rotateX(0.06);
+        fpGun.current.rotateX(0.08);
+        fpGun.current.updateMatrixWorld(true);
       }
     } else {
       camera.layers.mask = 0xffffffff;
@@ -1940,6 +1896,38 @@ export function SkyEscort({ color }: { color: string }) {
 
   return (
     <group>
+      {/* Gunner viewmodel — always in the R3F tree; pose updated in useFrame. */}
+      <group ref={fpGun} visible={false} frustumCulled={false} renderOrder={999}>
+        <mesh position={[0, 0.18, -0.7]} renderOrder={999} frustumCulled={false}>
+          <boxGeometry args={[0.08, 0.14, 0.08]} />
+          <primitive object={fpGunMats.bead} attach="material" />
+        </mesh>
+        <mesh position={[0, -0.14, 0.5]} renderOrder={999} frustumCulled={false}>
+          <boxGeometry args={[0.9, 0.48, 1.05]} />
+          <primitive object={fpGunMats.receiver} attach="material" />
+        </mesh>
+        <mesh position={[-0.58, -0.02, 0.35]} renderOrder={999} frustumCulled={false}>
+          <boxGeometry args={[0.22, 0.55, 0.8]} />
+          <primitive object={fpGunMats.cheek} attach="material" />
+        </mesh>
+        <mesh position={[0.58, -0.02, 0.35]} renderOrder={999} frustumCulled={false}>
+          <boxGeometry args={[0.22, 0.55, 0.8]} />
+          <primitive object={fpGunMats.cheek} attach="material" />
+        </mesh>
+        <mesh position={[0, -0.04, -1.35]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={999} frustumCulled={false}>
+          <cylinderGeometry args={[0.13, 0.17, 2.9, 14]} />
+          <primitive object={fpGunMats.steel} attach="material" />
+        </mesh>
+        <mesh position={[0, -0.04, -2.8]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={999} frustumCulled={false}>
+          <cylinderGeometry args={[0.2, 0.14, 0.4, 12]} />
+          <primitive object={fpGunMats.muzzle} attach="material" />
+        </mesh>
+        <mesh position={[0, -0.42, 0.3]} renderOrder={999} frustumCulled={false}>
+          <boxGeometry args={[0.28, 0.34, 0.55]} />
+          <primitive object={fpGunMats.grip} attach="material" />
+        </mesh>
+      </group>
+
       <color attach="background" args={["#140c08"]} />
       <fog attach="fog" args={["#1c100a", 28, 125]} />
       <ambientLight intensity={0.5} />
@@ -2201,11 +2189,22 @@ export function SkyEscort({ color }: { color: string }) {
             </div>
           )}
           {phase === "run" && seat === "gunner" && (
-            <div className={`sky-escort-crosshair${hitFlash ? " hit" : ""}`} aria-hidden>
-              <span className="sky-escort-crosshair-ring" />
-              <span className="sky-escort-crosshair-h" />
-              <span className="sky-escort-crosshair-v" />
-            </div>
+            <>
+              <div className={`sky-escort-crosshair${hitFlash ? " hit" : ""}`} aria-hidden>
+                <span className="sky-escort-crosshair-ring" />
+                <span className="sky-escort-crosshair-h" />
+                <span className="sky-escort-crosshair-v" />
+              </div>
+              {/* CSS barrel always visible — cannot fail with WebGL layers/culling. */}
+              <div className="sky-escort-viewmodel" aria-hidden>
+                <div className="sky-escort-viewmodel-cheek left" />
+                <div className="sky-escort-viewmodel-cheek right" />
+                <div className="sky-escort-viewmodel-receiver" />
+                <div className="sky-escort-viewmodel-barrel" />
+                <div className="sky-escort-viewmodel-muzzle" />
+                <div className="sky-escort-viewmodel-bead" />
+              </div>
+            </>
           )}
           <div
             className="sky-escort-card"
