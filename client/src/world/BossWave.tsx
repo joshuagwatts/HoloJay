@@ -977,21 +977,23 @@ export function BossWave({ color }: { color: string }) {
     if (phaseRef.current === "ready") {
       camera.position.set(ox, 11, 18);
       camera.lookAt(0, 1.5, 0);
-    } else if (seatRef.current === "gunner" && phaseRef.current === "fight") {
+    } else if (seatRef.current === "gunner" && (phaseRef.current === "fight" || phaseRef.current === "intro" || phaseRef.current === "clear")) {
       const t = turretWorld();
       const cy = Math.cos(gunYaw.current);
       const sy = Math.sin(gunYaw.current);
       const cp = Math.cos(gunPitch.current);
       const sp = Math.sin(gunPitch.current);
-      const back = lockedOn.current ? 1.1 : 0.55;
-      camera.position.set(t.x - sy * cp * back + ox, t.y + 0.55 + oy, t.z - cy * cp * back);
+      // Raised over-shoulder — close cheek-weld clipped inside the bed rails
+      const back = lockedOn.current ? 2.6 : 2.1;
+      const lift = 1.45;
+      camera.position.set(t.x - sy * cp * back + ox, t.y + lift + oy, t.z - cy * cp * back);
       if (lockedOn.current) {
         camera.lookAt(bc.x, bc.y, bc.z);
       } else {
         camera.lookAt(camera.position.x + sy * cp * 40, camera.position.y + sp * 40, camera.position.z + cy * cp * 40);
       }
       if (persp.isPerspectiveCamera) {
-        persp.fov = THREE.MathUtils.damp(persp.fov, lockedOn.current ? 58 : 68, 8, clamped);
+        persp.fov = THREE.MathUtils.damp(persp.fov, lockedOn.current ? 56 : 66, 8, clamped);
         persp.updateProjectionMatrix();
       }
     } else {
