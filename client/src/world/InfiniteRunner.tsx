@@ -1,9 +1,12 @@
 import { Html } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { createPortal } from "react-dom";
 import * as THREE from "three";
 import { submitScore } from "../net/scores.ts";
 import { useGame } from "../state/store.ts";
+import { isTouchUi } from "../touchUi.ts";
+import { GameTouchControls } from "../ui/GameTouchControls.tsx";
 
 const LANES = [-2.2, 0, 2.2];
 const JUMP_V = 9.5;
@@ -72,6 +75,16 @@ export function InfiniteRunner({ color }: { color: string }) {
     setPhaseBoth("run");
   }
 
+  function laneShift(dir: -1 | 1) {
+    targetLane.current = Math.max(0, Math.min(2, targetLane.current + dir));
+  }
+
+  function tryJump() {
+    if (phaseRef.current !== "run" || !grounded.current) return;
+    vy.current = JUMP_V;
+    grounded.current = false;
+  }
+
   // Snap camera into the track immediately — hub orbit left it miles away
   useEffect(() => {
     camera.position.set(0, 3.6, 8);
@@ -108,15 +121,14 @@ export function InfiniteRunner({ color }: { color: string }) {
       }
       if (p !== "run") return;
       if (e.code === "KeyA" || e.code === "ArrowLeft") {
-        targetLane.current = Math.max(0, targetLane.current - 1);
+        laneShift(-1);
       }
       if (e.code === "KeyD" || e.code === "ArrowRight") {
-        targetLane.current = Math.min(2, targetLane.current + 1);
+        laneShift(1);
       }
       if ((e.code === "Space" || e.code === "KeyW" || e.code === "ArrowUp") && grounded.current) {
         e.preventDefault();
-        vy.current = JUMP_V;
-        grounded.current = false;
+        tryJump();
       }
     };
     window.addEventListener("keydown", down);
@@ -248,13 +260,22 @@ export function InfiniteRunner({ color }: { color: string }) {
           <em>infinite runner</em>
           <strong>Lane Rush</strong>
           <span>
-            {phase === "ready" && "A / D change lanes · Space jump · Enter to start"}
+            {phase === "ready" &&
+              (isTouchUi()
+                ? "Tap Jump / arrows · Enter to start"
+                : "A / D change lanes · Space jump · Enter to start")}
             {phase === "run" && `${score} m`}
             {phase === "dead" && `Crashed at ${score} m · Space to retry`}
           </span>
           {bestFlash != null ? <span className="lb-best">New #1 — {bestFlash} m</span> : null}
         </div>
       </Html>
+      {phase === "run"
+        ? createPortal(
+            <GameTouchControls mode="lanes" onLane={laneShift} onJump={tryJump} />,
+            document.body,
+          )
+        : null}
     </group>
   );
 }

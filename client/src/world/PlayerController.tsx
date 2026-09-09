@@ -13,10 +13,11 @@ import {
   favoriteSlotPose,
   portalSlotPose,
 } from "@holojay/shared";
-import { isPadMoving, pad, setOnPadRelease } from "../inputPad.ts";
+import { consumeLookPad, isPadMoving, lookPad, pad, setOnPadRelease } from "../inputPad.ts";
 import { wearHat } from "../net/localRealm.ts";
 import { emitEnter, emitLeave, emitLoopComplete, emitMove, emitPin, emitUnpin } from "../net/session.ts";
 import { useGame } from "../state/store.ts";
+import { isTouchUi } from "../touchUi.ts";
 import { voice } from "../voice/proximity.ts";
 import { Orb } from "./Orb.tsx";
 
@@ -186,6 +187,7 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
 
     const click = () => {
       if (useGame.getState().chatOpen) return;
+      if (isTouchUi()) return; // touch uses sticks — no pointer lock on phones
       if (document.pointerLockElement !== el) void el.requestPointerLock();
     };
     const mouseMove = (e: MouseEvent) => {
@@ -248,7 +250,17 @@ export function PlayerController({ spawn }: { spawn: [number, number, number] })
     const g = group.current;
     if (!g) return;
 
-    // Smooth look apply — helps choppy trackpad reports
+    // Smooth look apply — helps choppy trackpad reports + touch look stick
+    const fromStick = lookPad.stickX || lookPad.stickY;
+    if (fromStick) {
+      lookQueueX.current += lookPad.stickX * 18;
+      lookQueueY.current += lookPad.stickY * 14;
+    }
+    const flicked = consumeLookPad();
+    if (flicked.x || flicked.y) {
+      lookQueueX.current += flicked.x;
+      lookQueueY.current += flicked.y;
+    }
     const lx = lookQueueX.current;
     const ly = lookQueueY.current;
     lookQueueX.current *= 0.28;

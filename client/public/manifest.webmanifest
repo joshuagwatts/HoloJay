@@ -1,0 +1,25 @@
+{
+  "name": "HoloJay Portal Realm",
+  "short_name": "HoloJay",
+  "description": "Glow as an orb — plaza, cabinets, Boss Wave, Sky Escort. Play on phone or desktop with friends.",
+  "start_url": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a0610",
+  "theme_color": "#0a0610",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1722,3 +1722,352 @@ kbd {
   box-shadow: 0 0 0 1px rgba(128, 216, 255, 0.25);
   pointer-events: none;
 }
+
+/* —— Cross-platform touch + profile —— */
+.hud-profile-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: inherit;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+}
+
+.hud-orb {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(244, 236, 220, 0.25), 0 0 16px currentColor;
+  flex-shrink: 0;
+}
+
+.hud.touch .hud-meta {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 52vw;
+  gap: 8px 12px;
+}
+
+.hud.touch .loop-rail {
+  top: auto;
+  bottom: auto;
+  left: 50%;
+  translate: -50% 0;
+  top: 72px;
+}
+
+.hint-center.touch-hint {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  max-width: min(88vw, 420px);
+}
+
+.touch-layer {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+}
+
+.vstick {
+  pointer-events: auto;
+  position: absolute;
+  width: min(28vw, 128px);
+  height: min(28vw, 128px);
+  border-radius: 50%;
+  border: 2px solid rgba(244, 236, 220, 0.28);
+  background: rgba(8, 6, 14, 0.45);
+  touch-action: none;
+  user-select: none;
+}
+
+.vstick-knob {
+  position: absolute;
+  inset: 28%;
+  border-radius: 50%;
+  background: rgba(244, 236, 220, 0.35);
+  border: 1px solid rgba(244, 236, 220, 0.5);
+  pointer-events: none;
+}
+
+.vstick-label {
+  position: absolute;
+  left: 50%;
+  bottom: -22px;
+  translate: -50% 0;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(244, 236, 220, 0.55);
+  white-space: nowrap;
+}
+
+.touch-move {
+  left: max(16px, env(safe-area-inset-left));
+  bottom: max(88px, calc(env(safe-area-inset-bottom) + 72px));
+}
+
+.touch-look {
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(88px, calc(env(safe-area-inset-bottom) + 72px));
+}
+
+.touch-action {
+  pointer-events: auto;
+  position: absolute;
+  appearance: none;
+  border: 1px solid rgba(244, 236, 220, 0.35);
+  background: rgba(8, 6, 14, 0.72);
+  color: #f4ecdc;
+  font-family: Syne, sans-serif;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 12px;
+  padding: 14px 16px;
+  min-width: 72px;
+  min-height: 52px;
+  touch-action: none;
+  user-select: none;
+  cursor: pointer;
+}
+
+.touch-action:active {
+  background: rgba(124, 240, 255, 0.28);
+  border-color: var(--cyan);
+}
+
+.touch-action.boost {
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(240px, calc(env(safe-area-inset-bottom) + 220px));
+}
+
+.hub-touch .touch-action.boost {
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(240px, calc(env(safe-area-inset-bottom) + 220px));
+}
+
+.hub-touch .touch-action.up {
+  right: max(100px, calc(env(safe-area-inset-right) + 88px));
+  bottom: max(240px, calc(env(safe-area-inset-bottom) + 220px));
+}
+
+.hub-touch .touch-action.dn {
+  right: max(100px, calc(env(safe-area-inset-right) + 88px));
+  bottom: max(180px, calc(env(safe-area-inset-bottom) + 160px));
+}
+
+.touch-action.fire {
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(240px, calc(env(safe-area-inset-bottom) + 220px));
+  min-width: 88px;
+  min-height: 88px;
+  border-radius: 50%;
+  background: rgba(224, 64, 251, 0.35);
+  border-color: #e040fb;
+}
+
+.touch-action.lock {
+  right: max(110px, calc(env(safe-area-inset-right) + 96px));
+  bottom: max(250px, calc(env(safe-area-inset-bottom) + 230px));
+}
+
+.touch-action.seat {
+  left: 50%;
+  translate: -50% 0;
+  bottom: max(24px, calc(env(safe-area-inset-bottom) + 16px));
+}
+
+.lane-touch .touch-action {
+  bottom: max(28px, calc(env(safe-area-inset-bottom) + 20px));
+}
+
+.lane-touch .lane-left {
+  left: max(18px, env(safe-area-inset-left));
+}
+
+.lane-touch .lane-right {
+  right: max(18px, env(safe-area-inset-right));
+}
+
+.lane-touch .lane-jump {
+  left: 50%;
+  translate: -50% 0;
+  min-width: 110px;
+}
+
+.profile-scrim {
+  pointer-events: auto;
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: grid;
+  place-items: end center;
+  padding: 16px;
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+  background: rgba(6, 4, 12, 0.72);
+}
+
+.profile-card {
+  width: min(100%, 420px);
+  max-height: min(88vh, 640px);
+  overflow: auto;
+  background:
+    radial-gradient(ellipse at 20% 0%, rgba(124, 240, 255, 0.12), transparent 50%),
+    linear-gradient(180deg, #16121c, #0c0a12);
+  border: 1px solid rgba(244, 236, 220, 0.16);
+  color: #f4ecdc;
+  padding: 18px 18px 22px;
+  display: grid;
+  gap: 14px;
+}
+
+.profile-head {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: start;
+}
+
+.profile-orb {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  box-shadow: 0 0 24px currentColor;
+}
+
+.profile-kicker {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgba(244, 236, 220, 0.5);
+}
+
+.profile-head h2 {
+  margin: 2px 0 0;
+  font-family: Syne, sans-serif;
+  font-size: 26px;
+  letter-spacing: -0.02em;
+}
+
+.profile-sub {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: rgba(244, 236, 220, 0.55);
+}
+
+.profile-close {
+  appearance: none;
+  border: 1px solid rgba(244, 236, 220, 0.25);
+  background: transparent;
+  color: #f4ecdc;
+  width: 36px;
+  height: 36px;
+  cursor: pointer;
+}
+
+.profile-field {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(244, 236, 220, 0.6);
+}
+
+.profile-field input {
+  appearance: none;
+  border: 1px solid rgba(244, 236, 220, 0.22);
+  background: rgba(0, 0, 0, 0.35);
+  color: #f4ecdc;
+  padding: 12px 12px;
+  font-size: 16px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.profile-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.profile-swatches button {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+}
+
+.profile-swatches button.on {
+  border-color: #f4ecdc;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.45);
+}
+
+.profile-hat,
+.profile-msg,
+.profile-hint {
+  margin: 0;
+  font-size: 12px;
+  color: rgba(244, 236, 220, 0.55);
+}
+
+.profile-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.profile-primary,
+.profile-secondary {
+  appearance: none;
+  border: none;
+  padding: 12px 14px;
+  font-family: Syne, sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.profile-primary {
+  background: linear-gradient(90deg, #7cf0ff, #e040fb);
+  color: #120818;
+  font-weight: 700;
+}
+
+.profile-secondary {
+  background: rgba(244, 236, 220, 0.08);
+  color: #f4ecdc;
+  border: 1px solid rgba(244, 236, 220, 0.2);
+}
+
+@media (max-width: 720px) {
+  .hud {
+    padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .hud-top {
+    gap: 10px;
+  }
+
+  .hud-meta span:nth-child(1),
+  .hud-meta span:nth-child(2),
+  .hud-meta span:nth-child(3) {
+    display: none;
+  }
+
+  .hud-bottom {
+    font-size: 11px;
+    gap: 8px;
+  }
+
+  .prompt {
+    left: 12px;
+    right: 12px;
+    width: auto;
+  }
+}

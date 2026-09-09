@@ -1,10 +1,18 @@
 import { Html } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import * as THREE from "three";
+import {
+  consumeVehicleLook,
+  resetVehiclePad,
+  vehiclePad,
+} from "../inputPad.ts";
 import { emitMinigame, onMinigame } from "../net/session.ts";
 import { useGame } from "../state/store.ts";
+import { isTouchUi } from "../touchUi.ts";
+import { GameTouchControls } from "../ui/GameTouchControls.tsx";
 
 /** Halo-3-finale vibe: pickup-truck trek A→B over a dying plain. Driver + bed gunner. */
 
@@ -1772,6 +1780,7 @@ export function SkyEscort({ color }: { color: string }) {
     snapSeatCam("driver");
     return () => {
       document.exitPointerLock?.();
+      resetVehiclePad();
       camera.position.set(3, 4.2, 11);
       camera.lookAt(0, 1.2, 0);
       camera.layers.enable(0);
@@ -1935,7 +1944,7 @@ export function SkyEscort({ color }: { color: string }) {
     };
     const onDown = () => {
       if (phaseRef.current !== "run" || pausedRef.current || seatRef.current !== "gunner") return;
-      if (document.pointerLockElement !== el) void el.requestPointerLock();
+      if (!isTouchUi() && document.pointerLockElement !== el) void el.requestPointerLock();
       fireHeld.current = true;
     };
     const onUp = () => {
@@ -2150,8 +2159,8 @@ export function SkyEscort({ color }: { color: string }) {
         emitMinigame(instanceId, "sky-escort", {
           type: "input",
           role: "driver",
-          throttle: keys.current.throttle,
-          steer: keys.current.steer,
+          throttle: Math.abs(vehiclePad.throttle) > 0.08 ? vehiclePad.throttle : keys.current.throttle,
+          steer: Math.abs(vehiclePad.steer) > 0.08 ? vehiclePad.steer : keys.current.steer,
         } satisfies InputMsg);
       }
     }
@@ -2159,6 +2168,11 @@ export function SkyEscort({ color }: { color: string }) {
     if (phaseRef.current === "run" && isHost && !pausedRef.current) {
       let throttle = keys.current.throttle;
       let steer = keys.current.steer;
+      if (driverIdRef.current === selfId) {
+        if (Math.abs(vehiclePad.throttle) > 0.08) throttle = vehiclePad.throttle;
+        if (Math.abs(vehiclePad.steer) > 0.08) steer = vehiclePad.steer;
+        if (vehiclePad.boost) tryBoost();
+      }
       const rin = remoteInput.current;
       if (driverIdRef.current !== selfId && rin?.role === "driver") {
         if (typeof rin.throttle === "number") throttle = rin.throttle;
@@ -2384,6 +2398,13 @@ export function SkyEscort({ color }: { color: string }) {
 
       if (!gunIsAi) {
         if (seatRef.current === "gunner") {
+          if (vehiclePad.stickX || vehiclePad.stickY) {
+            lookQ.current.x += vehiclePad.stickX * 22;
+            lookQ.current.y += vehiclePad.stickY * 18;
+          }
+          const flicked = consumeVehicleLook();
+          lookQ.current.x += flicked.x;
+          lookQ.current.y += flicked.y;
           gunYaw.current -= lookQ.current.x * 0.0032;
           gunPitch.current = Math.max(-0.4, Math.min(0.9, gunPitch.current - lookQ.current.y * 0.0028));
           lookQ.current.x *= 0.08;
@@ -2394,7 +2415,7 @@ export function SkyEscort({ color }: { color: string }) {
           if (typeof rin.pitch === "number") gunPitch.current = rin.pitch;
           if (rin.fire) fireHeld.current = true;
         }
-        if (fireHeld.current && fireCd.current <= 0) {
+        if ((fireHeld.current || vehiclePad.fire) && fireCd.current <= 0) {
           const cy = Math.cos(gunYaw.current);
           const sy = Math.sin(gunYaw.current);
           const cp = Math.cos(gunPitch.current);
@@ -2491,7 +2512,7 @@ export function SkyEscort({ color }: { color: string }) {
             role: "gunner",
             yaw: gunYaw.current,
             pitch: gunPitch.current,
-            fire: fireHeld.current,
+            fire: fireHeld.current || vehiclePad.fire,
           } satisfies InputMsg);
         }
       }
@@ -3438,6 +3459,16 @@ export function SkyEscort({ color }: { color: string }) {
           </div>
         </div>
       </Html>
+      {phase === "run" && !paused
+        ? createPortal(
+            <GameTouchControls
+              mode={seat === "driver" ? "vehicle-driver" : "vehicle-gunner"}
+              onSeat={() => pickSeat(seatRef.current === "driver" ? "gunner" : "driver")}
+              onBoostKey={() => tryBoost()}
+            />,
+            document.body,
+          )
+        : null}
     </group>
   );
 }

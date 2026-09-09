@@ -3,8 +3,15 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import * as THREE from "three";
+import {
+  consumeVehicleLook,
+  resetVehiclePad,
+  vehiclePad,
+} from "../inputPad.ts";
 import { emitLeave } from "../net/session.ts";
 import { useGame } from "../state/store.ts";
+import { isTouchUi } from "../touchUi.ts";
+import { GameTouchControls } from "../ui/GameTouchControls.tsx";
 
 /**
  * Boss Wave — central arena, escort-style truck (driver + bed gunner).
@@ -478,6 +485,11 @@ export function BossWave({ color }: { color: string }) {
               {lockedHud ? <i className="boss-wave-lockring" /> : null}
             </div>
           ) : null}
+          <GameTouchControls
+            mode={seat === "driver" ? "vehicle-driver" : "vehicle-gunner"}
+            onLock={() => toggleLock()}
+            onSeat={() => pickSeat(seatRef.current === "driver" ? "gunner" : "driver")}
+          />
         </div>,
       );
       return;
@@ -523,6 +535,7 @@ export function BossWave({ color }: { color: string }) {
     camera.updateProjectionMatrix();
     return () => {
       document.exitPointerLock?.();
+      resetVehiclePad();
     };
   }, [camera]);
 
@@ -623,7 +636,7 @@ export function BossWave({ color }: { color: string }) {
         return;
       }
       if (seatRef.current !== "gunner") return;
-      if (document.pointerLockElement !== el) void el.requestPointerLock();
+      if (!isTouchUi() && document.pointerLockElement !== el) void el.requestPointerLock();
       fireHeld.current = true;
     };
     const onUp = () => {
@@ -667,6 +680,10 @@ export function BossWave({ color }: { color: string }) {
       // —— Drive (player or AI if you're on the gun) ——
       let throttle = keys.current.throttle;
       let steer = keys.current.steer;
+      if (seatRef.current === "driver") {
+        if (Math.abs(vehiclePad.throttle) > 0.08) throttle = vehiclePad.throttle;
+        if (Math.abs(vehiclePad.steer) > 0.08) steer = vehiclePad.steer;
+      }
       if (seatRef.current === "gunner") {
         // AI driver orbits the arena and keeps distance from the boss.
         const want = Math.atan2(bc.x - px.current, bc.z - pz.current) + Math.PI * 0.55;
@@ -708,6 +725,14 @@ export function BossWave({ color }: { color: string }) {
         gunYaw.current += dyaw * Math.min(1, 10 * clamped);
         gunPitch.current = THREE.MathUtils.damp(gunPitch.current, THREE.MathUtils.clamp(targetPitch, -0.35, 0.7), 10, clamped);
       } else if (seatRef.current === "gunner") {
+        const stick = vehiclePad.stickX || vehiclePad.stickY;
+        if (stick) {
+          lookQ.current.x += vehiclePad.stickX * 22;
+          lookQ.current.y += vehiclePad.stickY * 18;
+        }
+        const flicked = consumeVehicleLook();
+        lookQ.current.x += flicked.x;
+        lookQ.current.y += flicked.y;
         gunYaw.current -= lookQ.current.x * 0.0032;
         gunPitch.current = Math.max(-0.4, Math.min(0.75, gunPitch.current - lookQ.current.y * 0.0028));
         lookQ.current.x *= 0.08;
@@ -729,7 +754,8 @@ export function BossWave({ color }: { color: string }) {
       // Fire — player gunner or AI gunner
       fireCd.current = Math.max(0, fireCd.current - clamped);
       const aiFire = seatRef.current === "driver";
-      const shouldFire = seatRef.current === "gunner" ? fireHeld.current : aiFire && fireCd.current <= 0;
+      const shouldFire =
+        seatRef.current === "gunner" ? fireHeld.current || vehiclePad.fire : aiFire && fireCd.current <= 0;
       if (shouldFire && fireCd.current <= 0) {
         const tip = muzzleWorld();
         const cy = Math.cos(gunYaw.current);

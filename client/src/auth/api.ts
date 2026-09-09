@@ -195,3 +195,44 @@ export function rememberGuest(user: AuthUser): void {
   if (user.guest) localStorage.setItem("holojay.guest", JSON.stringify(user));
   else localStorage.removeItem("holojay.guest");
 }
+
+export async function updateProfile(input: { username: string; color: string }): Promise<AuthUser> {
+  await loadRuntimeConfig();
+  const token = savedToken();
+  if (!token) throw new Error("Not signed in");
+
+  const name = input.username.trim();
+  if (!USERNAME_RE.test(name)) throw new Error("Username must be 3-16 letters, numbers, or _");
+  const color = /^#[0-9a-fA-F]{6}$/.test(input.color) ? input.color : "#5ce1ff";
+
+  if (token.startsWith("local.")) {
+    const id = token.slice("local.".length);
+    const users = loadUsers();
+    const row = Object.values(users).find((u) => u.id === id);
+    if (row) {
+      const clash = users[name.toLowerCase()];
+      if (clash && clash.id !== id) throw new Error("That name is already taken");
+      delete users[row.username.toLowerCase()];
+      const next = { ...row, username: name, color };
+      users[name.toLowerCase()] = next;
+      saveUsers(users);
+      return { id, username: name, color, guest: false };
+    }
+    const guestUser: AuthUser = { id, username: name, color, guest: true };
+    rememberGuest(guestUser);
+    return guestUser;
+  }
+
+  if (!hasMultiplayerHub()) throw new Error("Hub unavailable");
+  const remote = await tryRemote(() =>
+    fetch(apiUrl("/api/auth/profile"), {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ username: name, color }),
+    }).then((res) => read<AuthResponse>(res)),
+  );
+  if (!remote?.token || !remote.user) throw new Error("Could not update profile");
+  saveToken(remote.token);
+  rememberGuest(remote.user);
+  return remote.user;
+}

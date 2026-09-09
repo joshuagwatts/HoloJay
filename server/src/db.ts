@@ -49,6 +49,10 @@ export function insertUser(user: UserRow): void {
   ).run(user.id, user.username, user.password_hash, user.color, user.created_at);
 }
 
+export function updateUserProfile(id: string, username: string, color: string): void {
+  db.prepare("UPDATE users SET username = ?, color = ? WHERE id = ?").run(username, color, id);
+}
+
 export function listFavorites(userId: string): { game_id: string; slot: number }[] {
   return db
     .prepare("SELECT game_id, slot FROM favorites WHERE user_id = ? ORDER BY slot ASC")

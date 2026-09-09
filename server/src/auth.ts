@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import { Router } from "express";
 import jwt from "jsonwebtoken";
 import { ORB_COLORS, type AuthUser } from "@holojay/shared";
-import { findUserById, findUserByUsername, insertUser, listFavorites } from "./db.ts";
+import { findUserById, findUserByUsername, insertUser, listFavorites, updateUserProfile } from "./db.ts";
 
 const JWT_SECRET = process.env.JWT_SECRET ?? "holojay-dev-secret";
 const USERNAME_RE = /^[a-zA-Z0-9_]{3,16}$/;
@@ -128,4 +128,35 @@ authRouter.get("/me", (req, res) => {
   } catch {
     res.status(401).json({ message: "Invalid session" });
   }
+});
+
+authRouter.patch("/profile", async (req, res) => {
+  const header = req.headers.authorization ?? "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+  let user: AuthUser;
+  try {
+    user = verifyToken(token);
+  } catch {
+    res.status(401).json({ message: "Invalid session" });
+    return;
+  }
+
+  const username = String(req.body?.username ?? user.username).trim();
+  const color = pickColor(req.body?.color ?? user.color);
+  if (!USERNAME_RE.test(username)) {
+    res.status(400).json({ message: "Username must be 3-16 letters, numbers, or _" });
+    return;
+  }
+
+  if (!user.guest) {
+    const taken = findUserByUsername(username);
+    if (taken && taken.id !== user.id) {
+      res.status(409).json({ message: "That name is already taken" });
+      return;
+    }
+    updateUserProfile(user.id, username, color);
+  }
+
+  const next: AuthUser = { ...user, username, color };
+  res.json({ token: signUser(next), user: next });
 });

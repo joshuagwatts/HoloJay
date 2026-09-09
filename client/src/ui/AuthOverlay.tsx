@@ -83,8 +83,8 @@ export function AuthOverlay() {
         </p>
         <h1>Portal Realm</h1>
         <p className="lede">
-          Become a glowing orb. Drift the figure-eight. Pin the doors you love at the crossing — everything else
-          reshuffles when you complete a loop.
+          Become a glowing orb on phone or desktop. Invite friends to your plaza, pin the doors you love, and hop into
+          Boss Wave together.
         </p>
 
         {mode === "enter" && (
