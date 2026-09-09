@@ -12,6 +12,7 @@ import { gameById } from "@holojay/shared";
 export function App() {
   const user = useGame((s) => s.user);
   const hubReady = useGame((s) => s.hubReady);
+  const location = useGame((s) => s.location);
   const [booting, setBooting] = useState(true);
 
   useEffect(() => {
@@ -79,18 +80,19 @@ export function App() {
       const loc = useGame.getState().location;
       if (loc.type === "game" && loc.gameId === enter) {
         sessionStorage.removeItem("holojay.enter");
+        const params = new URLSearchParams(window.location.search);
+        params.delete("enter");
+        const next = `${window.location.pathname}${params.toString() ? `?${params}` : ""}${window.location.hash}`;
+        window.history.replaceState({}, "", next);
         return;
       }
+      // Keep holojay.enter until we're actually in-room — socket `welcome` can
+      // reset location to hub after the first attempt.
       emitEnterDirect(enter);
-      sessionStorage.removeItem("holojay.enter");
-      const params = new URLSearchParams(window.location.search);
-      params.delete("enter");
-      const next = `${window.location.pathname}${params.toString() ? `?${params}` : ""}${window.location.hash}`;
-      window.history.replaceState({}, "", next);
     } catch {
       /* ignore */
     }
-  }, [user, hubReady]);
+  }, [user, hubReady, location]);
 
   if (booting) {
     return (
