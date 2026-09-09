@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import {
   CHECKPOINT_COUNT,
+  gameById,
   type AuthUser,
   type Favorite,
   type FollowInvitePayload,
@@ -136,18 +137,28 @@ export const useGame = create<GameStore>((set, get) => ({
       hubReady: false,
     }),
   setConnected: (connected) => set({ connected }),
-  setWelcome: ({ self, players, assignments, favorites }) =>
+  setWelcome: ({ self, players, assignments, favorites }) => {
+    // Honor pending `?enter=<gameId>` so socket welcome can't yank us back to hub.
+    let location: PlayerLocation = { type: "hub" };
+    try {
+      const enter = sessionStorage.getItem("holojay.enter");
+      if (enter && gameById(enter)) {
+        location = { type: "game", gameId: enter, instanceId: `local:${enter}` };
+      }
+    } catch {
+      /* ignore */
+    }
     set({
       selfId: self.id,
       assignments,
       favorites,
-      // Always land in the hub first — minigames only after the plaza is up
-      location: { type: "hub" },
+      location,
       players: Object.fromEntries(players.map((p) => [p.id, p])),
       connected: true,
       loopVisited: emptyLoop(),
       hubReady: true,
-    }),
+    });
+  },
   upsertPlayer: (player) => set({ players: { ...get().players, [player.id]: player } }),
   removePlayer: (id) => {
     const next = { ...get().players };
