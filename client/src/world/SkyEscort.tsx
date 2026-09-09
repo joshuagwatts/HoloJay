@@ -70,9 +70,9 @@ function makeLevel(n: number): LevelDef {
 }
 
 /** Tiny arcade one-shots — silence was killing the fantasy. */
-type SfxKind = "fire" | "kill" | "boom" | "boost" | "hurt" | "gate" | "hit";
+type SfxKind = "fire" | "kill" | "boom" | "boost" | "hurt" | "gate" | "hit" | "crash";
 let sfxCtx: AudioContext | null = null;
-function playSfx(kind: SfxKind) {
+function playSfx(kind: SfxKind, volMul = 1) {
   try {
     sfxCtx ??= new AudioContext();
     if (sfxCtx.state === "suspended") void sfxCtx.resume();
@@ -86,6 +86,7 @@ function playSfx(kind: SfxKind) {
       hit: { f: 880, f2: 440, dur: 0.06, type: "triangle", vol: 0.05 },
       kill: { f: 660, f2: 1320, dur: 0.12, type: "sawtooth", vol: 0.07 },
       boom: { f: 90, f2: 40, dur: 0.22, type: "sine", vol: 0.09 },
+      crash: { f: 70, f2: 28, dur: 0.38, type: "sawtooth", vol: 0.11 },
       boost: { f: 220, f2: 520, dur: 0.18, type: "sawtooth", vol: 0.06 },
       hurt: { f: 160, f2: 70, dur: 0.2, type: "square", vol: 0.08 },
       gate: { f: 392, f2: 784, dur: 0.28, type: "triangle", vol: 0.08 },
@@ -94,13 +95,48 @@ function playSfx(kind: SfxKind) {
     o.type = s.type;
     o.frequency.setValueAtTime(s.f, t0);
     o.frequency.exponentialRampToValueAtTime(Math.max(30, s.f2), t0 + s.dur);
-    g.gain.setValueAtTime(s.vol, t0);
+    const vol = Math.max(0.0001, s.vol * volMul);
+    g.gain.setValueAtTime(vol, t0);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + s.dur);
     o.start(t0);
     o.stop(t0 + s.dur + 0.02);
+
+    // Meteor crash gets a noise burst on top of the low thump.
+    if (kind === "crash") {
+      const nLen = Math.floor(sfxCtx.sampleRate * 0.32);
+      const buf = sfxCtx.createBuffer(1, nLen, sfxCtx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < nLen; i++) {
+        const env = Math.pow(1 - i / nLen, 2.1);
+        data[i] = (Math.random() * 2 - 1) * env;
+      }
+      const src = sfxCtx.createBufferSource();
+      src.buffer = buf;
+      const filter = sfxCtx.createBiquadFilter();
+      filter.type = "bandpass";
+      filter.frequency.setValueAtTime(520, t0);
+      filter.frequency.exponentialRampToValueAtTime(90, t0 + 0.28);
+      filter.Q.value = 0.7;
+      const ng = sfxCtx.createGain();
+      ng.gain.setValueAtTime(0.07 * volMul, t0);
+      ng.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.32);
+      src.connect(filter);
+      filter.connect(ng);
+      ng.connect(sfxCtx.destination);
+      src.start(t0);
+      src.stop(t0 + 0.34);
+    }
   } catch {
     /* audio optional */
   }
+}
+
+/** Distance-scaled meteor ground slam — always audible nearby, soft far away. */
+function playMeteorCrash(dist: number) {
+  const near = Math.max(0, Math.min(1, 1 - dist / 52));
+  if (near < 0.05) return;
+  playSfx("crash", 0.35 + near * 1.1);
+  if (near > 0.35) playSfx("boom", 0.4 + near * 0.9);
 }
 
 function levelIndexFromId(id: string | undefined): number {
@@ -572,6 +608,83 @@ function setRadarPing(mesh: THREE.Mesh, on: boolean, id: number) {
   ping.rotation.y = t * 0.35;
 }
 
+/** Flame + smoke trail behind falling rocks — drama on the way down. */
+function attachMeteorTrail(mesh: THREE.Mesh) {
+  const trail = new THREE.Group();
+  trail.name = "meteorTrail";
+  const flame = new THREE.Mesh(
+    new THREE.ConeGeometry(0.32, 2.35, 8, 1, true),
+    new THREE.MeshBasicMaterial({
+      color: "#ff6d00",
+      transparent: true,
+      opacity: 0.82,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    }),
+  );
+  flame.rotation.x = Math.PI / 2;
+  flame.position.z = -1.35;
+  flame.name = "flame";
+  const core = new THREE.Mesh(
+    new THREE.ConeGeometry(0.14, 1.55, 6, 1, true),
+    new THREE.MeshBasicMaterial({
+      color: "#ffe082",
+      transparent: true,
+      opacity: 0.9,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    }),
+  );
+  core.rotation.x = Math.PI / 2;
+  core.position.z = -0.95;
+  core.name = "core";
+  trail.add(flame, core);
+  for (let i = 0; i < 4; i++) {
+    const smoke = new THREE.Mesh(
+      new THREE.SphereGeometry(0.22 + i * 0.14, 6, 6),
+      new THREE.MeshBasicMaterial({
+        color: i % 2 ? "#6d4c41" : "#4e342e",
+        transparent: true,
+        opacity: 0.38 - i * 0.06,
+        depthWrite: false,
+      }),
+    );
+    smoke.position.z = -1.7 - i * 0.55;
+    smoke.name = `smoke${i}`;
+    trail.add(smoke);
+  }
+  mesh.add(trail);
+  return mesh;
+}
+
+function updateMeteorTrail(mesh: THREE.Mesh, m: Meteor) {
+  const trail = mesh.getObjectByName("meteorTrail") as THREE.Group | undefined;
+  if (!trail) return;
+  // Face the fall so the trail streams behind the rock.
+  mesh.lookAt(m.x + m.vx, m.y + m.vy, m.z + m.vz);
+  const t = performance.now() * 0.012 + m.id;
+  const flame = trail.getObjectByName("flame") as THREE.Mesh | undefined;
+  const core = trail.getObjectByName("core") as THREE.Mesh | undefined;
+  if (flame) {
+    const s = 1 + Math.sin(t * 2.4) * 0.18;
+    flame.scale.set(s, s, 1.05 + Math.sin(t * 3.1) * 0.2);
+    (flame.material as THREE.MeshBasicMaterial).opacity = 0.7 + Math.sin(t * 4) * 0.15;
+  }
+  if (core) {
+    const s = 0.9 + Math.sin(t * 3.5) * 0.2;
+    core.scale.set(s, s, 1 + Math.sin(t * 2.2) * 0.25);
+  }
+  for (let i = 0; i < 4; i++) {
+    const smoke = trail.getObjectByName(`smoke${i}`) as THREE.Mesh | undefined;
+    if (!smoke) continue;
+    const wobble = 1 + Math.sin(t + i) * 0.2;
+    smoke.scale.setScalar(wobble);
+    smoke.position.x = Math.sin(t * 0.8 + i) * 0.12;
+    smoke.position.y = Math.cos(t * 0.7 + i * 0.5) * 0.1;
+    (smoke.material as THREE.MeshBasicMaterial).opacity = Math.max(0.08, 0.36 - i * 0.06 + Math.sin(t + i) * 0.04);
+  }
+}
+
 type RadarBlip = { id: number; kind: "meteor" | "alien"; nx: number; nz: number };
 
 function ThreatRadarScope({ blips }: { blips: RadarBlip[] }) {
@@ -676,10 +789,14 @@ export function SkyEscort({ color }: { color: string }) {
   const nextId = useRef(1);
   const meteorAcc = useRef(0);
   const alienAcc = useRef(0);
+  /** Hold rocks/ships until the truck first moves — short suspense beat. */
+  const threatsArmed = useRef(false);
   const snapAcc = useRef(0);
   const gunSendAcc = useRef(0);
   const gunYaw = useRef(0);
   const gunPitch = useRef(0.12);
+  /** 0 = cheek-weld tight, 1 = pulled back / wider FOV for congested skies. */
+  const gunZoom = useRef(0);
   const fireHeld = useRef(false);
   const fireCd = useRef(0);
   const lookQ = useRef({ x: 0, y: 0 });
@@ -1312,37 +1429,16 @@ export function SkyEscort({ color }: { color: string }) {
     blasts.current = [];
     meteorAcc.current = 0.55;
     alienAcc.current = 0.7;
+    threatsArmed.current = false;
     boostTimer.current = 0;
     distScoreAcc.current = 0;
     fovKick.current = 0;
+    gunZoom.current = 0;
     // Keep upgrades across levels; top off one boost charge each clear.
     loadout.current.boostCharges = Math.min(loadout.current.boostMax, loadout.current.boostCharges + 1);
     setLoadoutHud({ ...loadout.current });
     buildTerrain();
-    // Seed threats for themed waves — keep L0 quiet.
-    const seedN =
-      L.threat === "meteors"
-        ? 0
-        : L.threat === "aliens"
-          ? nextLevelIdx <= 1
-            ? 1
-            : 2 + Math.min(2, Math.floor(nextLevelIdx / 5))
-          : nextLevelIdx <= 1
-            ? 1
-            : 2 + Math.min(2, Math.floor(nextLevelIdx / 4));
-    for (let i = 0; i < seedN; i++) {
-      const pt = pathPoint(0.22 + i * 0.12, nextLevelIdx, L.startZ, L.endZ);
-      aliens.current.push(
-        makeAlien(
-          nextId.current++,
-          pt.x + (Math.random() - 0.5) * 14,
-          pt.y + 7 + Math.random() * 5,
-          pt.z,
-          nextLevelIdx < 3 ? 1 : 2,
-          nextLevelIdx,
-        ),
-      );
-    }
+    // No pre-seeded threats — first movement arms the sky for suspense.
     shakeRef.current = 0;
     failCueT.current = 0;
     setFailCue(false);
@@ -1848,10 +1944,19 @@ export function SkyEscort({ color }: { color: string }) {
     el.addEventListener("mousemove", onMove);
     el.addEventListener("mousedown", onDown);
     window.addEventListener("mouseup", onUp);
+    const onWheel = (e: WheelEvent) => {
+      if (phaseRef.current !== "run" || pausedRef.current || seatRef.current !== "gunner") return;
+      e.preventDefault();
+      // Trackpad pinch often arrives as ctrl+wheel; plain scroll also zooms.
+      const sens = e.ctrlKey ? 0.012 : 0.0018;
+      gunZoom.current = THREE.MathUtils.clamp(gunZoom.current + e.deltaY * sens, 0, 1);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
     return () => {
       el.removeEventListener("mousemove", onMove);
       el.removeEventListener("mousedown", onDown);
       window.removeEventListener("mouseup", onUp);
+      el.removeEventListener("wheel", onWheel);
     };
   }, [gl]);
 
@@ -2109,6 +2214,16 @@ export function SkyEscort({ color }: { color: string }) {
         }
       }
 
+      // Suspense: sky stays quiet until the truck actually rolls.
+      if (
+        !threatsArmed.current &&
+        (Math.abs(throttle) > 0.12 || Math.abs(speed.current) > 2.2 || Math.abs(steer) > 0.35)
+      ) {
+        threatsArmed.current = true;
+        meteorAcc.current = 0.15;
+        alienAcc.current = 0.25;
+      }
+
       // Continuous ground follow + crater pits (no block tiles).
       const surface = gy(x.current, z.current);
       const pit = craterCarve(x.current, z.current, craters.current);
@@ -2152,12 +2267,12 @@ export function SkyEscort({ color }: { color: string }) {
         }
       }
 
-      meteorAcc.current += clamped;
+      meteorAcc.current += threatsArmed.current ? clamped : 0;
       const meteorEvery = Math.max(
         0.45,
         level.meteorEvery - progress * Math.min(0.28, 0.1 + levelIdxRef.current * 0.02),
       );
-      if (level.threat !== "aliens" && meteorAcc.current >= meteorEvery) {
+      if (threatsArmed.current && level.threat !== "aliens" && meteorAcc.current >= meteorEvery) {
         meteorAcc.current = 0;
         // Bias impacts toward the truck corridor so they matter.
         const near = Math.random() < (levelIdxRef.current < 2 ? 0.4 : 0.62);
@@ -2179,12 +2294,15 @@ export function SkyEscort({ color }: { color: string }) {
         m.z += m.vz * clamped;
         if (m.y < 0.3) {
           addBlast(m.x, 0.45, m.z);
-          const nearTruck = Math.hypot(m.x - x.current, m.z - z.current) < 11;
+          const dist = Math.hypot(m.x - x.current, m.z - z.current);
+          playMeteorCrash(dist);
+          const nearTruck = dist < 11;
           if (nearTruck) {
             shakeRef.current = Math.max(shakeRef.current, 0.7);
             failCueT.current = 0.9;
             setFailCue(true);
-            playSfx("boom");
+          } else if (dist < 28) {
+            shakeRef.current = Math.max(shakeRef.current, 0.25 * (1 - dist / 28));
           }
           craters.current.push({
             id: nextId.current++,
@@ -2201,13 +2319,14 @@ export function SkyEscort({ color }: { color: string }) {
           hurt(1);
           m.y = -99;
           addBlast(x.current, y.current, z.current);
+          playMeteorCrash(2);
         }
       }
       meteors.current = meteors.current.filter((m) => m.y > -20 && m.z < z.current + 40);
 
-      alienAcc.current += clamped;
+      alienAcc.current += threatsArmed.current ? clamped : 0;
       const alienEvery = Math.max(0.48, level.alienEvery - progress * 0.4);
-      if (level.threat !== "meteors" && alienAcc.current >= alienEvery) {
+      if (threatsArmed.current && level.threat !== "meteors" && alienAcc.current >= alienEvery) {
         alienAcc.current = 0;
         // Spawn further downrange — ships come in from deep sky / ahead of the ribbon.
         const pack =
@@ -2617,6 +2736,7 @@ export function SkyEscort({ color }: { color: string }) {
       (m, mesh) => {
         mesh.visible = m.y > -10;
         mesh.position.set(m.x, m.y, m.z);
+        updateMeteorTrail(mesh, m);
         const mat = mesh.material as THREE.MeshStandardMaterial;
         const radarOn = loadout.current.radar;
         setRadarPing(mesh, radarOn && m.y > -10, m.id);
@@ -2625,12 +2745,16 @@ export function SkyEscort({ color }: { color: string }) {
           mat.emissive.set("#ff9100");
           mat.color.set("#ffcc80");
         } else {
-          mat.emissiveIntensity = 0.55;
+          mat.emissiveIntensity = 0.85 + Math.sin(performance.now() * 0.02 + m.id) * 0.25;
           mat.emissive.set("#ff6d00");
           mat.color.set("#5c4030");
         }
       },
-      () => attachRadarPing(new THREE.Mesh(new THREE.DodecahedronGeometry(0.55), mats.meteor.clone()), "#ff6d00"),
+      () =>
+        attachRadarPing(
+          attachMeteorTrail(new THREE.Mesh(new THREE.DodecahedronGeometry(0.55), mats.meteor.clone())),
+          "#ff6d00",
+        ),
     );
 
     syncGroup(
@@ -2808,7 +2932,7 @@ export function SkyEscort({ color }: { color: string }) {
         persp.updateProjectionMatrix();
       }
     } else if (seatRef.current === "gunner" && phaseRef.current === "run" && !pausedRef.current) {
-      // Gunner free-look: cheek-weld behind the turret; aim is pure world yaw/pitch.
+      // Gunner free-look: cheek-weld behind the turret; scroll / pinch pulls back when congested.
       if (buggy.current) buggy.current.visible = true;
       const t = turretWorld();
       const cy = Math.cos(gunYaw.current);
@@ -2816,10 +2940,13 @@ export function SkyEscort({ color }: { color: string }) {
       const cp = Math.cos(gunPitch.current);
       const sp = Math.sin(gunPitch.current);
       const dir = gunLookDir.current.set(sy * cp, sp, cy * cp);
+      const z = gunZoom.current;
+      const back = 0.45 + z * 3.1;
+      const lift = 0.42 + z * 0.75;
       camera.position.set(
-        t.x - dir.x * 0.45 + ox * 0.08,
-        t.y + 0.42 + oy * 0.08,
-        t.z - dir.z * 0.45,
+        t.x - dir.x * back + ox * 0.08,
+        t.y + lift + oy * 0.08,
+        t.z - dir.z * back,
       );
       camera.lookAt(
         camera.position.x + dir.x * 60,
@@ -2828,14 +2955,10 @@ export function SkyEscort({ color }: { color: string }) {
       );
       // Layer 0 only (cab is on 1). Viewmodel is scene-synced onto this camera pose.
       camera.layers.set(0);
-      if (persp.isPerspectiveCamera) {
-        persp.fov = THREE.MathUtils.damp(persp.fov, hitFlash ? 72 : 65, 10, clamped);
-        persp.near = 0.05;
-        persp.updateProjectionMatrix();
-      }
       if (fpGun.current) fpGun.current.visible = false;
       if (persp.isPerspectiveCamera) {
-        persp.fov = THREE.MathUtils.damp(persp.fov, hitFlash ? 72 : 65, 10, clamped);
+        const wantFov = (hitFlash ? 72 : 62) + z * 18;
+        persp.fov = THREE.MathUtils.damp(persp.fov, wantFov, 10, clamped);
         persp.near = 0.05;
         persp.updateProjectionMatrix();
       }
@@ -3302,8 +3425,8 @@ export function SkyEscort({ color }: { color: string }) {
                 {clearBanner ? <p className="sky-escort-alert">{clearBanner}</p> : failCue ? <p className="sky-escort-alert">METEOR IMPACT</p> : null}
                 <p className="sky-escort-hint">
                   {seat === "driver"
-                    ? "WASD · Shift boost · Esc pause · stay on the ribbon"
-                    : "Mouse free-look · hold fire · Esc pause · radar = HUD + sky pings"}
+                    ? "WASD · Shift boost · Esc pause · sky waits until you roll"
+                    : "Mouse free-look · scroll/pinch zoom · hold fire · Esc pause"}
                 </p>
               </>
             )}
