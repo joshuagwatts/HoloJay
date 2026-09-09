@@ -1635,6 +1635,49 @@ kbd {
   transition: width 0.12s linear;
 }
 
+.boss-wave-seats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  align-items: center;
+  margin: 8px auto 0;
+  width: min(92vw, 420px);
+}
+
+.boss-wave-seats > button:not(.boss-wave-go) {
+  appearance: none;
+  border: 1px solid rgba(179, 136, 255, 0.45);
+  background: rgba(14, 8, 20, 0.9);
+  color: rgba(244, 236, 220, 0.75);
+  font-family: Syne, sans-serif;
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 10px 16px;
+  cursor: pointer;
+}
+
+.boss-wave-seats > button:not(.boss-wave-go).on {
+  border-color: #e040fb;
+  color: #f4ecdc;
+  background: rgba(224, 64, 251, 0.18);
+}
+
+.boss-wave-seats .boss-wave-go {
+  margin: 0;
+}
+
+.boss-wave-lock {
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(244, 236, 220, 0.45);
+}
+
+.boss-wave-lock.on {
+  color: #80d8ff;
+}
+
 .boss-wave-crosshair {
   position: absolute;
   left: 50%;
@@ -1665,4 +1708,17 @@ kbd {
 
 .boss-wave-crosshair.hurt span {
   background: #ff5252;
+}
+
+.boss-wave-crosshair.locked span {
+  background: #80d8ff;
+}
+
+.boss-wave-lockring {
+  position: absolute;
+  inset: -14px;
+  border: 2px solid rgba(128, 216, 255, 0.85);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(128, 216, 255, 0.25);
+  pointer-events: none;
 }
