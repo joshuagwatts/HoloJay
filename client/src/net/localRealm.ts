@@ -187,6 +187,11 @@ export function localEnterDirect(gameId: string): void {
 }
 
 export function localLeave(): void {
+  try {
+    sessionStorage.removeItem("holojay.enter");
+  } catch {
+    /* ignore */
+  }
   useGame.getState().setLocation({ type: "hub" });
 }
 

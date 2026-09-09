@@ -92,6 +92,11 @@ export function emitEnterDirect(gameId: string): void {
 }
 
 export function emitLeave(): void {
+  try {
+    sessionStorage.removeItem("holojay.enter");
+  } catch {
+    /* ignore */
+  }
   if (localMode()) localLeave();
   else remoteLeave();
 }

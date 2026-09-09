@@ -79,15 +79,15 @@ export function App() {
       if (!enter || !gameById(enter)) return;
       const loc = useGame.getState().location;
       if (loc.type === "game" && loc.gameId === enter) {
-        sessionStorage.removeItem("holojay.enter");
+        // Keep holojay.enter until leave — socket welcome can fire again and must re-honor it.
         const params = new URLSearchParams(window.location.search);
-        params.delete("enter");
-        const next = `${window.location.pathname}${params.toString() ? `?${params}` : ""}${window.location.hash}`;
-        window.history.replaceState({}, "", next);
+        if (params.has("enter")) {
+          params.delete("enter");
+          const next = `${window.location.pathname}${params.toString() ? `?${params}` : ""}${window.location.hash}`;
+          window.history.replaceState({}, "", next);
+        }
         return;
       }
-      // Keep holojay.enter until we're actually in-room — socket `welcome` can
-      // reset location to hub after the first attempt.
       emitEnterDirect(enter);
     } catch {
       /* ignore */
