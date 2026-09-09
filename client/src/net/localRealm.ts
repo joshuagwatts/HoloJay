@@ -152,6 +152,8 @@ function enterGameRoom(gameId: string): void {
     state.setNotice("Lane Rush — Enter to start · Return in HUD to leave");
   } else if (gameId === "sky-escort") {
     state.setNotice("Sky Escort — pick a seat · Return in HUD to leave");
+  } else if (gameId === "boss-wave") {
+    state.setNotice("Boss Wave — Space to fight · Return in HUD to leave");
   } else {
     state.setNotice("Hold E at the return door to leave");
   }

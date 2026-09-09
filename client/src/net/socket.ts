@@ -98,6 +98,8 @@ export function connectRealm(token: string): Socket {
         useGame.getState().setNotice("Sky Escort — pick a seat · Return in HUD to leave");
       } else if (location.gameId === "lane-rush") {
         useGame.getState().setNotice("Lane Rush — Enter to start · Return in HUD to leave");
+      } else if (location.gameId === "boss-wave") {
+        useGame.getState().setNotice("Boss Wave — Space to fight · Return in HUD to leave");
       } else {
         useGame.getState().setNotice("Hold E at the return door to leave");
       }

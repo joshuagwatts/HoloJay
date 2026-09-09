@@ -10,6 +10,7 @@ import { RemoteOrbs } from "./RemoteOrbs.tsx";
 import { MagicShaderShell } from "./MagicRoomFx.tsx";
 import { InfiniteRunner } from "./InfiniteRunner.tsx";
 import { SkyEscort } from "./SkyEscort.tsx";
+import { BossWave } from "./BossWave.tsx";
 
 const ROOM_SPAWN: [number, number, number] = [0, 1.2, 4];
 
@@ -51,6 +52,20 @@ export function MinigameRoom() {
       <group>
         <SkyEscort color={game.color} />
         <Html position={[0, 0.8, 16]} center style={{ pointerEvents: "none" }}>
+          <div className="arcade-label">
+            <strong>Leave anytime</strong>
+            <span>Use Return in the HUD</span>
+          </div>
+        </Html>
+      </group>
+    );
+  }
+
+  if (location.gameId === "boss-wave") {
+    return (
+      <group>
+        <BossWave color={game.color} />
+        <Html position={[0, 0.8, 14]} center style={{ pointerEvents: "none" }}>
           <div className="arcade-label">
             <strong>Leave anytime</strong>
             <span>Use Return in the HUD</span>

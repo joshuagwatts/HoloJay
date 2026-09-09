@@ -23,6 +23,13 @@ export const GAMES: GameDef[] = [
     tagline: "Offroad trek A→B — driver + gunner",
     mode: "fun",
   },
+  {
+    id: "boss-wave",
+    name: "Boss Wave",
+    color: "#b388ff",
+    tagline: "Giant bosses · wave after wave",
+    mode: "fun",
+  },
 ];
 
 export function gameById(id: string): GameDef | undefined {
