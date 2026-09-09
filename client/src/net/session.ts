@@ -86,9 +86,9 @@ export function emitEnter(source: "path" | "favorite", slot: number, gameId: str
   else remoteEnter(source, slot, gameId);
 }
 
-/** Solo shortcut used by `?enter=<gameId>` deep links. */
+/** Solo shortcut used by `?enter=<gameId>` deep links (works even if a hub socket is up). */
 export function emitEnterDirect(gameId: string): void {
-  if (localMode()) localEnterDirect(gameId);
+  localEnterDirect(gameId);
 }
 
 export function emitLeave(): void {

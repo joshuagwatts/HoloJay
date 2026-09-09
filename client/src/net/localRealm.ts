@@ -153,7 +153,7 @@ function enterGameRoom(gameId: string): void {
   } else if (gameId === "sky-escort") {
     state.setNotice("Sky Escort — pick a seat · Return in HUD to leave");
   } else if (gameId === "boss-wave") {
-    state.setNotice("Boss Wave — Space to fight · Return in HUD to leave");
+    state.setNotice("Boss Wave — pick a seat · Q locks boss · Return in HUD to leave");
   } else {
     state.setNotice("Hold E at the return door to leave");
   }
