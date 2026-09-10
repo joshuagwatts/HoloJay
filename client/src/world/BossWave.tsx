@@ -15,7 +15,8 @@ import { GameTouchControls } from "../ui/GameTouchControls.tsx";
 
 /**
  * Boss Wave — central arena, escort-style truck (driver + bed gunner).
- * Gunner can LOCK onto the active boss or unlock for free-look.
+ * Gunner starts in FREE AIM; optional boss lock (Q / L / MMB) is assist only.
+ * AI gunner (while you drive) tracks the boss without stealing your lock state.
  * Starter roster: Ash Skull · Mire Slime · Starlight Serpent
  */
 
@@ -226,7 +227,7 @@ export function BossWave({ color }: { color: string }) {
   const [garage, setGarage] = useState<GarageState>(() => loadGarage());
   const garageRef = useRef(garage);
   garageRef.current = garage;
-  const [lockedHud, setLockedHud] = useState(true);
+  const [lockedHud, setLockedHud] = useState(false);
   const [waveIdx, setWaveIdx] = useState(0);
   const waveIdxRef = useRef(0);
   const [hull, setHull] = useState(PLAYER_HULL);
@@ -244,7 +245,7 @@ export function BossWave({ color }: { color: string }) {
   const speed = useRef(0);
   const gunYaw = useRef(Math.PI);
   const gunPitch = useRef(0.1);
-  const lockedOn = useRef(true);
+  const lockedOn = useRef(false);
   const keys = useRef({ throttle: 0, steer: 0 });
   const fireHeld = useRef(false);
   const fireCd = useRef(0);
@@ -293,6 +294,11 @@ export function BossWave({ color }: { color: string }) {
   function pickSeat(role: Role) {
     seatRef.current = role;
     setSeat(role);
+    // Entering gunner always opens in free aim — lock is opt-in assist.
+    if (role === "gunner") {
+      lockedOn.current = false;
+      setLockedHud(false);
+    }
   }
 
   function patchGarage(patch: Partial<GarageState>) {
@@ -387,6 +393,11 @@ export function BossWave({ color }: { color: string }) {
     setIntroWave(null);
     introT.current = 0;
     setPhaseBoth("fight");
+    if (seatRef.current === "gunner") {
+      lockedOn.current = false;
+      setLockedHud(false);
+      flash("FREE AIM · Q / L / MMB locks boss", 1.8);
+    }
   }
 
   function resetAll() {
@@ -399,8 +410,8 @@ export function BossWave({ color }: { color: string }) {
     speed.current = 0;
     gunYaw.current = Math.PI;
     gunPitch.current = 0.1;
-    lockedOn.current = true;
-    setLockedHud(true);
+    lockedOn.current = false;
+    setLockedHud(false);
     bullets.current = [];
     lasers.current = [];
     invuln.current = 0;
@@ -629,7 +640,9 @@ export function BossWave({ color }: { color: string }) {
               Roll out
             </button>
           </div>
-          <p className="sky-escort-garage-hint">Tap a card · pick Driver or Gunner · Roll out · Space starts · Tab swaps seat</p>
+          <p className="sky-escort-garage-hint">
+            Tap a card · pick Driver or Gunner · Roll out · Tab swaps · Gunner free-aims (Q / L / MMB locks)
+          </p>
         </div>,
       );
       return;
@@ -645,9 +658,13 @@ export function BossWave({ color }: { color: string }) {
               {"♡".repeat(Math.max(0, PLAYER_HULL - hull))}
             </span>
             <span>{seat === "driver" ? "DRIVER" : "GUNNER"}</span>
-            <span className={lockedHud ? "boss-wave-lock on" : "boss-wave-lock"}>
-              {lockedHud ? "LOCK ON" : "FREE AIM"}
-            </span>
+            {seat === "gunner" ? (
+              <span className={lockedHud ? "boss-wave-lock on" : "boss-wave-lock"}>
+                {lockedHud ? "LOCK ON" : "FREE AIM"}
+              </span>
+            ) : (
+              <span className="boss-wave-lock">AI GUN</span>
+            )}
             <span>WAVE {waveIdx + 1}</span>
             {banner ? <span className="boss-wave-banner">{banner}</span> : null}
           </div>
@@ -897,49 +914,50 @@ export function BossWave({ color }: { color: string }) {
         speed.current *= 0.65;
       }
 
-      // —— Gun aim: lock-on tracks boss, else free-look (player gunner or AI) ——
-      const wantLock = lockedOn.current;
-      if (wantLock) {
+      // —— Gun aim ——
+      // Player gunner: free look by default; optional lock tracks boss.
+      // AI gunner (driver seat): always tracks boss, never mutates player lock state.
+      const trackBossAim = () => {
         const tw = turretWorld();
-        const dx = bc.x - tw.x;
-        const dy = bc.y - tw.y;
-        const dz = bc.z - tw.z;
-        const targetYaw = Math.atan2(dx, dz);
-        const dist = Math.hypot(dx, dz) || 1;
-        const targetPitch = Math.atan2(dy, dist);
+        const tdx = bc.x - tw.x;
+        const tdy = bc.y - tw.y;
+        const tdz = bc.z - tw.z;
+        const targetYaw = Math.atan2(tdx, tdz);
+        const dist = Math.hypot(tdx, tdz) || 1;
+        const targetPitch = Math.atan2(tdy, dist);
         let dyaw = targetYaw - gunYaw.current;
         while (dyaw > Math.PI) dyaw -= Math.PI * 2;
         while (dyaw < -Math.PI) dyaw += Math.PI * 2;
         gunYaw.current += dyaw * Math.min(1, 10 * clamped);
-        gunPitch.current = THREE.MathUtils.damp(gunPitch.current, THREE.MathUtils.clamp(targetPitch, -0.35, 0.7), 10, clamped);
-      } else if (seatRef.current === "gunner") {
-        const stick = vehiclePad.stickX || vehiclePad.stickY;
-        if (stick) {
-          lookQ.current.x += vehiclePad.stickX * 22;
-          lookQ.current.y += vehiclePad.stickY * 18;
+        gunPitch.current = THREE.MathUtils.damp(
+          gunPitch.current,
+          THREE.MathUtils.clamp(targetPitch, -0.35, 0.7),
+          10,
+          clamped,
+        );
+      };
+      if (seatRef.current === "gunner") {
+        if (lockedOn.current) {
+          trackBossAim();
+        } else {
+          const stick = vehiclePad.stickX || vehiclePad.stickY;
+          if (stick) {
+            lookQ.current.x += vehiclePad.stickX * 22;
+            lookQ.current.y += vehiclePad.stickY * 18;
+          }
+          const flicked = consumeVehicleLook();
+          lookQ.current.x += flicked.x;
+          lookQ.current.y += flicked.y;
+          gunYaw.current -= lookQ.current.x * 0.0032;
+          gunPitch.current = Math.max(-0.4, Math.min(0.75, gunPitch.current - lookQ.current.y * 0.0028));
+          lookQ.current.x *= 0.08;
+          lookQ.current.y *= 0.08;
         }
-        const flicked = consumeVehicleLook();
-        lookQ.current.x += flicked.x;
-        lookQ.current.y += flicked.y;
-        gunYaw.current -= lookQ.current.x * 0.0032;
-        gunPitch.current = Math.max(-0.4, Math.min(0.75, gunPitch.current - lookQ.current.y * 0.0028));
-        lookQ.current.x *= 0.08;
-        lookQ.current.y *= 0.08;
       } else {
-        // AI gunner always locks when you're driving
-        if (!lockedOn.current) {
-          lockedOn.current = true;
-          setLockedHud(true);
-        }
-        const tw = turretWorld();
-        const dx = bc.x - tw.x;
-        const dy = bc.y - tw.y;
-        const dz = bc.z - tw.z;
-        gunYaw.current = Math.atan2(dx, dz);
-        gunPitch.current = Math.atan2(dy, Math.hypot(dx, dz) || 1);
+        trackBossAim();
       }
 
-      // Fire — player gunner or AI gunner
+      // Fire along the barrel — lock only steers the turret, never hijacks shot direction
       fireCd.current = Math.max(0, fireCd.current - clamped);
       const aiFire = seatRef.current === "driver";
       const turret = garageRef.current.turret;
@@ -950,15 +968,9 @@ export function BossWave({ color }: { color: string }) {
       const sy = Math.sin(gunYaw.current);
       const cp = Math.cos(gunPitch.current);
       const sp = Math.sin(gunPitch.current);
-      let dx = sy * cp;
-      let dy = sp;
-      let dz = cy * cp;
-      if (lockedOn.current && (aiFire || turret === "beam")) {
-        const len = Math.hypot(bc.x - tip.x, bc.y - tip.y, bc.z - tip.z) || 1;
-        dx = (bc.x - tip.x) / len;
-        dy = (bc.y - tip.y) / len;
-        dz = (bc.z - tip.z) / len;
-      }
+      const dx = sy * cp;
+      const dy = sp;
+      const dz = cy * cp;
 
       // Beam lance: continuous hit-scan laser while firing (not projectile dots)
       const beamHeld =
