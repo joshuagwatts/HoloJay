@@ -1000,8 +1000,8 @@ export function BossWave({ color }: { color: string }) {
             dy,
             dz,
             len: hitLen,
-            life: 0.14,
-            maxLife: 0.14,
+            life: 1,
+            maxLife: 1,
             tint: lockedOn.current ? tipColor : "#ff80ab",
           },
         ];
@@ -1014,6 +1014,9 @@ export function BossWave({ color }: { color: string }) {
           playSfx("fire");
         }
       } else {
+        lasers.current = lasers.current
+          .map((L) => ({ ...L, life: L.life - clamped * 5 }))
+          .filter((L) => L.life > 0);
         const shouldFire =
           seatRef.current === "gunner" ? gunnerFiring : aiFire && fireCd.current <= 0;
         if (shouldFire && fireCd.current <= 0 && turret !== "beam") {
@@ -1272,14 +1275,12 @@ export function BossWave({ color }: { color: string }) {
       () => new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 8), new THREE.MeshBasicMaterial({ color: "#ffe082" })),
     );
 
-    // Beam lance — solid laser cylinder along the aim ray
-    for (const L of lasers.current) L.life -= clamped;
-    lasers.current = lasers.current.filter((L) => L.life > 0);
+    // Beam lance visual sync — solid cylinder along the aim ray
     syncGroup(
       laserGroup.current,
       lasers.current,
       (L, mesh) => {
-        const fade = Math.max(0.35, L.life / L.maxLife);
+        const held = L.life >= 0.95;
         mesh.visible = true;
         mesh.position.set(L.ox + L.dx * L.len * 0.5, L.oy + L.dy * L.len * 0.5, L.oz + L.dz * L.len * 0.5);
         _laserDir.current.set(L.dx, L.dy, L.dz).normalize();
@@ -1287,12 +1288,12 @@ export function BossWave({ color }: { color: string }) {
         mesh.scale.set(1, Math.max(0.5, L.len), 1);
         const mat = mesh.material as THREE.MeshBasicMaterial;
         mat.color.set(L.tint);
-        mat.opacity = 0.75 + fade * 0.25;
+        mat.opacity = held ? 0.96 : Math.max(0.12, L.life);
         const glow = mesh.children[0] as THREE.Mesh | undefined;
         if (glow?.isMesh) {
           const gm = glow.material as THREE.MeshBasicMaterial;
           gm.color.set(L.tint);
-          gm.opacity = 0.28 + fade * 0.32;
+          gm.opacity = held ? 0.45 : Math.max(0.06, L.life * 0.45);
         }
       },
       () => {
