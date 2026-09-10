@@ -1,7 +1,6 @@
 import { Html } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import * as THREE from "three";
 import {
@@ -808,6 +807,7 @@ export function SkyEscort({ color }: { color: string }) {
   const fireHeld = useRef(false);
   const fireCd = useRef(0);
   const lookQ = useRef({ x: 0, y: 0 });
+  const boostPadPrev = useRef(false);
   const remoteInput = useRef<InputMsg | null>(null);
   const driverIdRef = useRef<string | null>(selfId);
   const gunnerIdRef = useRef<string | null>("ai");
@@ -1720,6 +1720,12 @@ export function SkyEscort({ color }: { color: string }) {
     // Gunner: crosshair + thin vitals. Driver/gunner both get Threat Radar HUD when equipped.
     if (phase === "run") {
       const radarHud = loadoutHud.radar ? <ThreatRadarScope blips={radarBlips} /> : null;
+      const touch = (
+        <GameTouchControls
+          mode={seat === "driver" ? "vehicle-driver" : "vehicle-gunner"}
+          onSeat={() => pickSeat(seatRef.current === "driver" ? "gunner" : "driver")}
+        />
+      );
       if (seat === "gunner") {
         root.render(
           <div className="sky-escort-gun-overlay" aria-hidden>
@@ -1742,14 +1748,18 @@ export function SkyEscort({ color }: { color: string }) {
               {failCue ? <span className="sky-escort-vitals-alert">IMPACT</span> : null}
             </div>
             {radarHud}
+            {touch}
           </div>,
         );
         return;
       }
-      if (radarHud) {
-        root.render(<div className="sky-escort-gun-overlay">{radarHud}</div>);
-        return;
-      }
+      root.render(
+        <div className="sky-escort-gun-overlay" aria-hidden>
+          {radarHud}
+          {touch}
+        </div>,
+      );
+      return;
     }
 
     root.render(null);
@@ -2171,7 +2181,11 @@ export function SkyEscort({ color }: { color: string }) {
       if (driverIdRef.current === selfId) {
         if (Math.abs(vehiclePad.throttle) > 0.08) throttle = vehiclePad.throttle;
         if (Math.abs(vehiclePad.steer) > 0.08) steer = vehiclePad.steer;
-        if (vehiclePad.boost) tryBoost();
+        // Rising-edge only — holding Boost must not drain every charge after the timer ends
+        if (vehiclePad.boost && !boostPadPrev.current) tryBoost();
+        boostPadPrev.current = vehiclePad.boost;
+      } else {
+        boostPadPrev.current = false;
       }
       const rin = remoteInput.current;
       if (driverIdRef.current !== selfId && rin?.role === "driver") {
@@ -3459,16 +3473,6 @@ export function SkyEscort({ color }: { color: string }) {
           </div>
         </div>
       </Html>
-      {phase === "run" && !paused
-        ? createPortal(
-            <GameTouchControls
-              mode={seat === "driver" ? "vehicle-driver" : "vehicle-gunner"}
-              onSeat={() => pickSeat(seatRef.current === "driver" ? "gunner" : "driver")}
-              onBoostKey={() => tryBoost()}
-            />,
-            document.body,
-          )
-        : null}
     </group>
   );
 }

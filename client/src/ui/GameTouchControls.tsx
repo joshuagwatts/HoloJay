@@ -20,7 +20,6 @@ type Props = {
   onJump?: () => void;
   onLock?: () => void;
   onSeat?: () => void;
-  onBoostKey?: () => void;
 };
 
 function holdBtn(on: () => void, off: () => void) {
@@ -41,7 +40,7 @@ function holdBtn(on: () => void, off: () => void) {
  * Cross-platform touch chrome — hub look/move, vehicle drive/gun, lane buttons.
  * Hidden automatically on fine-pointer desktops.
  */
-export function GameTouchControls({ mode, onLane, onJump, onLock, onSeat, onBoostKey }: Props) {
+export function GameTouchControls({ mode, onLane, onJump, onLock, onSeat }: Props) {
   const [touch, setTouch] = useState(() => (typeof window !== "undefined" ? isTouchUi() : false));
   useEffect(() => watchTouchUi(setTouch), []);
   if (!touch) return null;
@@ -85,13 +84,7 @@ export function GameTouchControls({ mode, onLane, onJump, onLock, onSeat, onBoos
         <button
           type="button"
           className="touch-action boost"
-          {...holdBtn(
-            () => {
-              setVehicleBoost(true);
-              onBoostKey?.();
-            },
-            () => setVehicleBoost(false),
-          )}
+          {...holdBtn(() => setVehicleBoost(true), () => setVehicleBoost(false))}
         >
           Boost
         </button>

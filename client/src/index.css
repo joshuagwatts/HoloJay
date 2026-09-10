@@ -2071,3 +2071,16 @@ kbd {
     width: auto;
   }
 }
+
+.boss-wave-garage.sky-escort-garage {
+  z-index: 10050;
+}
+
+.boss-wave-roster.compact {
+  margin: 8px 0 0;
+  width: 100%;
+}
+
+.boss-wave-roster.compact li {
+  padding: 8px 10px;
+}
