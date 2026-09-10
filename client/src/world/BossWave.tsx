@@ -64,7 +64,7 @@ const VEHICLES: { id: VehicleId; label: string; blurb: string }[] = [
 const TURRETS: { id: TurretId; label: string; blurb: string; color: string; rate: number }[] = [
   { id: "mg", label: "Auto MG", blurb: "Fast taps · lock-friendly", color: "#80d8ff", rate: 1 },
   { id: "scatter", label: "Scatter", blurb: "Close burst · shreds soft bosses", color: "#ffab40", rate: 0.72 },
-  { id: "beam", label: "Beam lance", blurb: "Hard hits · slower cadence", color: "#e040fb", rate: 0.55 },
+  { id: "beam", label: "Beam lance", blurb: "Continuous laser · hard hits", color: "#e040fb", rate: 0.55 },
 ];
 
 const GARAGE_KEY = "holojay.bossGarage";
@@ -148,6 +148,21 @@ type Bullet = {
   tint: string;
   scale: number;
   dmg: number;
+};
+
+/** One-shot laser bolt visual (Beam lance) — not a traveling sphere. */
+type LaserBolt = {
+  id: number;
+  ox: number;
+  oy: number;
+  oz: number;
+  dx: number;
+  dy: number;
+  dz: number;
+  len: number;
+  life: number;
+  maxLife: number;
+  tint: string;
 };
 
 type SfxKind = "fire" | "hurt" | "hit" | "kill" | "boom" | "intro" | "lock";
@@ -238,6 +253,11 @@ export function BossWave({ color }: { color: string }) {
   const nextId = useRef(1);
   const bullets = useRef<Bullet[]>([]);
   const bulletGroup = useRef<THREE.Group>(null);
+  const lasers = useRef<LaserBolt[]>([]);
+  const laserGroup = useRef<THREE.Group>(null);
+  const _laserUp = useRef(new THREE.Vector3(0, 1, 0));
+  const _laserDir = useRef(new THREE.Vector3());
+  const _laserQuat = useRef(new THREE.Quaternion());
   const truck = useRef<THREE.Group>(null);
   const gunMount = useRef<THREE.Group>(null);
   const gunPitchMount = useRef<THREE.Group>(null);
@@ -382,6 +402,7 @@ export function BossWave({ color }: { color: string }) {
     lockedOn.current = true;
     setLockedHud(true);
     bullets.current = [];
+    lasers.current = [];
     invuln.current = 0;
     fireCd.current = 0;
     keys.current = { throttle: 0, steer: 0 };
@@ -921,73 +942,128 @@ export function BossWave({ color }: { color: string }) {
       // Fire — player gunner or AI gunner
       fireCd.current = Math.max(0, fireCd.current - clamped);
       const aiFire = seatRef.current === "driver";
-      const shouldFire =
-        seatRef.current === "gunner" ? fireHeld.current || vehiclePad.fire : aiFire && fireCd.current <= 0;
-      if (shouldFire && fireCd.current <= 0) {
-        const tip = muzzleWorld();
-        const cy = Math.cos(gunYaw.current);
-        const sy = Math.sin(gunYaw.current);
-        const cp = Math.cos(gunPitch.current);
-        const sp = Math.sin(gunPitch.current);
-        // Slight lead assist only while locked
-        let dx = sy * cp;
-        let dy = sp;
-        let dz = cy * cp;
-        if (lockedOn.current && aiFire) {
-          // AI keeps tight lock shots
-          const tw = tip;
-          const len = Math.hypot(bc.x - tw.x, bc.y - tw.y, bc.z - tw.z) || 1;
-          dx = (bc.x - tw.x) / len;
-          dy = (bc.y - tw.y) / len;
-          dz = (bc.z - tw.z) / len;
+      const turret = garageRef.current.turret;
+      const tipColor = TURRETS.find((t) => t.id === turret)?.color ?? "#80d8ff";
+      const gunnerFiring = fireHeld.current || vehiclePad.fire;
+      const tip = muzzleWorld();
+      const cy = Math.cos(gunYaw.current);
+      const sy = Math.sin(gunYaw.current);
+      const cp = Math.cos(gunPitch.current);
+      const sp = Math.sin(gunPitch.current);
+      let dx = sy * cp;
+      let dy = sp;
+      let dz = cy * cp;
+      if (lockedOn.current && (aiFire || turret === "beam")) {
+        const len = Math.hypot(bc.x - tip.x, bc.y - tip.y, bc.z - tip.z) || 1;
+        dx = (bc.x - tip.x) / len;
+        dy = (bc.y - tip.y) / len;
+        dz = (bc.z - tip.z) / len;
+      }
+
+      // Beam lance: continuous hit-scan laser while firing (not projectile dots)
+      const beamHeld =
+        turret === "beam" && (seatRef.current === "gunner" ? gunnerFiring : true);
+      if (beamHeld) {
+        const maxLen = 110;
+        let hitLen = maxLen;
+        let hit = false;
+        const step = 1.2 * BOSS_SCALE;
+        for (let d = 1.2; d < maxLen; d += step) {
+          const hx = tip.x + dx * d;
+          const hy = tip.y + dy * d;
+          const hz = tip.z + dz * d;
+          if (bossKind.current === "serpent") {
+            for (const seg of serpentSegs.current) {
+              if (Math.hypot(hx - seg.x, hy - seg.y, hz - seg.z) < 1.5 * BOSS_SCALE) {
+                hitLen = d;
+                hit = true;
+                break;
+              }
+            }
+            if (hit) break;
+          } else {
+            const hitR = (bossKind.current === "slime" ? 3.4 : 2.6) * BOSS_SCALE;
+            if (Math.hypot(hx - bc.x, hy - bc.y, hz - bc.z) < hitR) {
+              hitLen = d;
+              hit = true;
+              break;
+            }
+          }
         }
-        const turret = garageRef.current.turret;
-        const tipColor = TURRETS.find((t) => t.id === turret)?.color ?? "#80d8ff";
-        const dmg = turret === "beam" ? 2 : 1;
-        if (turret === "scatter") {
-          for (let i = 0; i < 5; i++) {
-            const jx = (Math.random() - 0.5) * 0.18;
-            const jy = (Math.random() - 0.5) * 0.14;
-            const jz = (Math.random() - 0.5) * 0.18;
-            let sdx = dx + jx;
-            let sdy = dy + jy;
-            let sdz = dz + jz;
-            const len = Math.hypot(sdx, sdy, sdz) || 1;
+        lasers.current = [
+          {
+            id: lasers.current[0]?.id ?? nextId.current++,
+            ox: tip.x,
+            oy: tip.y,
+            oz: tip.z,
+            dx,
+            dy,
+            dz,
+            len: hitLen,
+            life: 0.14,
+            maxLife: 0.14,
+            tint: lockedOn.current ? tipColor : "#ff80ab",
+          },
+        ];
+        if (fireCd.current <= 0) {
+          if (hit) {
+            damageBoss(2);
+            shake.current = Math.max(shake.current, 0.28);
+          }
+          fireCd.current = (aiFire ? 0.38 : 0.26) / (TURRETS.find((t) => t.id === turret)?.rate ?? 1);
+          playSfx("fire");
+        }
+      } else {
+        const shouldFire =
+          seatRef.current === "gunner" ? gunnerFiring : aiFire && fireCd.current <= 0;
+        if (shouldFire && fireCd.current <= 0 && turret !== "beam") {
+          if (turret === "scatter") {
+            for (let i = 0; i < 5; i++) {
+              const jx = (Math.random() - 0.5) * 0.18;
+              const jy = (Math.random() - 0.5) * 0.14;
+              const jz = (Math.random() - 0.5) * 0.18;
+              let sdx = dx + jx;
+              let sdy = dy + jy;
+              let sdz = dz + jz;
+              const len = Math.hypot(sdx, sdy, sdz) || 1;
+              bullets.current.push({
+                id: nextId.current++,
+                x: tip.x,
+                y: tip.y,
+                z: tip.z,
+                dx: sdx / len,
+                dy: sdy / len,
+                dz: sdz / len,
+                speed: 40,
+                life: 1.1,
+                friendly: true,
+                tint: tipColor,
+                scale: 0.85,
+                dmg: 1,
+              });
+            }
+            fireCd.current = (aiFire ? 0.22 : 0.11) / (TURRETS.find((t) => t.id === turret)?.rate ?? 1);
+            playSfx("fire");
+          } else {
             bullets.current.push({
               id: nextId.current++,
               x: tip.x,
               y: tip.y,
               z: tip.z,
-              dx: sdx / len,
-              dy: sdy / len,
-              dz: sdz / len,
-              speed: 40,
-              life: 1.1,
+              dx,
+              dy,
+              dz,
+              speed: 48,
+              life: 1.7,
               friendly: true,
-              tint: tipColor,
-              scale: 0.85,
+              tint: lockedOn.current ? tipColor : "#ffe082",
+              scale: 1,
               dmg: 1,
             });
+            fireCd.current = (aiFire ? 0.22 : 0.11) / (TURRETS.find((t) => t.id === turret)?.rate ?? 1);
+            playSfx("fire");
           }
-        } else {
-          bullets.current.push({
-            id: nextId.current++,
-            x: tip.x,
-            y: tip.y,
-            z: tip.z,
-            dx,
-            dy,
-            dz,
-            speed: turret === "beam" ? 62 : 48,
-            life: turret === "beam" ? 2.1 : 1.7,
-            friendly: true,
-            tint: lockedOn.current ? tipColor : "#ffe082",
-            scale: turret === "beam" ? 1.55 : 1,
-            dmg,
-          });
         }
-        fireCd.current = (aiFire ? 0.22 : 0.11) / (TURRETS.find((t) => t.id === turret)?.rate ?? 1);
-        playSfx("fire");
       }
 
       // Boss AI (unchanged patterns)
@@ -1196,6 +1272,54 @@ export function BossWave({ color }: { color: string }) {
       () => new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 8), new THREE.MeshBasicMaterial({ color: "#ffe082" })),
     );
 
+    // Beam lance — solid laser cylinder along the aim ray
+    for (const L of lasers.current) L.life -= clamped;
+    lasers.current = lasers.current.filter((L) => L.life > 0);
+    syncGroup(
+      laserGroup.current,
+      lasers.current,
+      (L, mesh) => {
+        const fade = Math.max(0.35, L.life / L.maxLife);
+        mesh.visible = true;
+        mesh.position.set(L.ox + L.dx * L.len * 0.5, L.oy + L.dy * L.len * 0.5, L.oz + L.dz * L.len * 0.5);
+        _laserDir.current.set(L.dx, L.dy, L.dz).normalize();
+        mesh.quaternion.setFromUnitVectors(_laserUp.current, _laserDir.current);
+        mesh.scale.set(1, Math.max(0.5, L.len), 1);
+        const mat = mesh.material as THREE.MeshBasicMaterial;
+        mat.color.set(L.tint);
+        mat.opacity = 0.75 + fade * 0.25;
+        const glow = mesh.children[0] as THREE.Mesh | undefined;
+        if (glow?.isMesh) {
+          const gm = glow.material as THREE.MeshBasicMaterial;
+          gm.color.set(L.tint);
+          gm.opacity = 0.28 + fade * 0.32;
+        }
+      },
+      () => {
+        const core = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.14, 0.2, 1, 10),
+          new THREE.MeshBasicMaterial({
+            color: "#e040fb",
+            transparent: true,
+            opacity: 0.98,
+            depthWrite: false,
+          }),
+        );
+        const glow = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.36, 0.48, 1, 10),
+          new THREE.MeshBasicMaterial({
+            color: "#ea80fc",
+            transparent: true,
+            opacity: 0.4,
+            depthWrite: false,
+          }),
+        );
+        core.add(glow);
+        core.renderOrder = 9;
+        return core;
+      },
+    );
+
     if (truck.current) {
       truck.current.position.set(px.current, py.current, pz.current);
       truck.current.rotation.y = yaw.current;
@@ -1339,6 +1463,7 @@ export function BossWave({ color }: { color: string }) {
       </mesh>
 
       <group ref={bulletGroup} />
+      <group ref={laserGroup} />
 
       {/* Escort truck — driver cab + bed turret */}
       <group ref={truck} position={[0, 0.85, Math.min(55, ARENA_R * 0.35)]} rotation={[0, Math.PI, 0]} scale={[bodyW, 1, garage.vehicle === "wagon" ? 1.12 : garage.vehicle === "buggy" ? 0.9 : 1]}>
@@ -1388,14 +1513,30 @@ export function BossWave({ color }: { color: string }) {
               <meshStandardMaterial color="#efebe9" metalness={0.8} />
             </mesh>
             <mesh position={[0, 0.06, 1.35]} rotation={[Math.PI / 2, 0, 0]}>
-              <cylinderGeometry args={[0.09, 0.12, 1.7, 10]} />
-              <meshStandardMaterial color="#d7ccc8" metalness={0.85} />
+              <cylinderGeometry
+                args={
+                  garage.turret === "beam"
+                    ? [0.06, 0.1, 2.35, 10]
+                    : [0.09, 0.12, 1.7, 10]
+                }
+              />
+              <meshStandardMaterial
+                color={garage.turret === "beam" ? "#eceff1" : "#d7ccc8"}
+                metalness={0.9}
+                roughness={0.15}
+                emissive={garage.turret === "beam" ? turretDef.color : "#000000"}
+                emissiveIntensity={garage.turret === "beam" ? 0.45 : 0}
+              />
             </mesh>
-            <mesh position={[0, 0.06, 2.2]} rotation={[Math.PI / 2, 0, 0]}>
-              <cylinderGeometry args={[0.14, 0.1, 0.22, 8]} />
+            <mesh position={[0, 0.06, garage.turret === "beam" ? 2.55 : 2.2]} rotation={[Math.PI / 2, 0, 0]}>
+              {garage.turret === "beam" ? (
+                <torusGeometry args={[0.18, 0.045, 8, 16]} />
+              ) : (
+                <cylinderGeometry args={[0.14, 0.1, 0.22, 8]} />
+              )}
               <meshStandardMaterial color={turretDef.color} emissive={turretDef.color} emissiveIntensity={1.1} />
             </mesh>
-            <pointLight position={[0, 0.2, 1]} color={turretDef.color} intensity={4} distance={7} />
+            <pointLight position={[0, 0.2, 1]} color={turretDef.color} intensity={garage.turret === "beam" ? 6 : 4} distance={9} />
           </group>
         </group>
         <pointLight position={[0, 1.2, 2]} color={cabColor} intensity={8} distance={12} />
