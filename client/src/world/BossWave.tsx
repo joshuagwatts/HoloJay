@@ -253,6 +253,10 @@ export function BossWave({ color }: { color: string }) {
   const slimeVy = useRef(0);
   const slimeY = useRef(2.4);
   const serpentSegs = useRef<{ x: number; y: number; z: number }[]>([]);
+  /** >0 while charging the truck; telegraph when between -0.55 and 0. */
+  const serpentLungeT = useRef(0);
+  const serpentLungeDir = useRef({ x: 0, y: 0, z: 1 });
+  const serpentHitLatch = useRef(false);
   const clearT = useRef(0);
   const introT = useRef(0);
   const shake = useRef(0);
@@ -339,8 +343,11 @@ export function BossWave({ color }: { color: string }) {
         y: 4.5 + Math.sin(i * 0.5) * 1.2,
         z: -18 - i * 3.2,
       }));
+      serpentLungeT.current = -1.4;
+      serpentHitLatch.current = false;
     } else {
       serpentSegs.current = [];
+      serpentLungeT.current = 0;
     }
   }
 
@@ -380,7 +387,16 @@ export function BossWave({ color }: { color: string }) {
     keys.current = { throttle: 0, steer: 0 };
     waveIdxRef.current = 0;
     setWaveIdx(0);
-    beginWave(0);
+    let start = 0;
+    try {
+      const kind = sessionStorage.getItem("holojay.bossKind");
+      if (kind === "serpent") start = 2;
+      else if (kind === "slime") start = 1;
+      else if (kind === "skull") start = 0;
+    } catch {
+      /* ignore */
+    }
+    beginWave(start);
   }
 
   function bossCenter(): { x: number; y: number; z: number } {
@@ -1033,16 +1049,77 @@ export function BossWave({ color }: { color: string }) {
         if (segs.length) {
           const head = segs[0]!;
           const t = bossAge.current;
-          const targetX = Math.sin(t * 0.9) * 7 + Math.sin(t * 0.3) * 2;
-          const targetZ = -2 + Math.cos(t * 0.7) * 5;
-          const targetY = 2.4 + Math.sin(t * 1.6) * 0.8;
-          head.x += (targetX - head.x) * 1.8 * clamped;
-          head.z += (targetZ - head.z) * 1.8 * clamped;
-          head.y += (targetY - head.y) * 2.2 * clamped;
-          if (bossPhase.current % 5 === 2 && bossCd.current > 0.9) {
-            head.x += (px.current - head.x) * 2.5 * clamped;
-            head.z += (pz.current - head.z) * 2.5 * clamped;
+          const segGap = 1.05 * BOSS_SCALE;
+          const lungeHitR = 2.8 * BOSS_SCALE;
+
+          // Telegraph (negative) → lunge (positive) → brief rest, then re-arm
+          if (serpentLungeT.current < 0) {
+            serpentLungeT.current = Math.min(0, serpentLungeT.current + clamped);
+            if (serpentLungeT.current >= 0) {
+              const dx = px.current - head.x;
+              const dy = py.current + 1.1 - head.y;
+              const dz = pz.current - head.z;
+              const len = Math.hypot(dx, dy, dz) || 1;
+              serpentLungeDir.current = { x: dx / len, y: dy / len, z: dz / len };
+              serpentLungeT.current = 0.95;
+              serpentHitLatch.current = false;
+              shake.current = Math.max(shake.current, 0.35);
+              flash("SERPENT LUNGE", 0.85);
+              playSfx("boom");
+            }
+          } else if (serpentLungeT.current > 0) {
+            const rush = 58;
+            head.x += serpentLungeDir.current.x * rush * clamped;
+            head.y += serpentLungeDir.current.y * rush * clamped;
+            head.z += serpentLungeDir.current.z * rush * clamped;
+            // Slight home-in so it still tracks a moving truck
+            head.x += (px.current - head.x) * 1.1 * clamped;
+            head.z += (pz.current - head.z) * 1.1 * clamped;
+            serpentLungeT.current -= clamped;
+            if (
+              !serpentHitLatch.current &&
+              Math.hypot(px.current - head.x, pz.current - head.z) < lungeHitR &&
+              Math.abs(py.current + 0.5 - head.y) < lungeHitR * 0.85
+            ) {
+              serpentHitLatch.current = true;
+              hurt(2);
+              shake.current = Math.max(shake.current, 0.85);
+              playSfx("hurt");
+            }
+            if (serpentLungeT.current <= 0) {
+              serpentLungeT.current = -(2.4 - Math.min(0.9, waveIdxRef.current * 0.08));
+            }
           }
+
+          // Orbit when not mid-lunge charge
+          if (serpentLungeT.current <= 0) {
+            const orbit = 38 + Math.sin(t * 0.25) * 8;
+            const targetX = Math.sin(t * 0.55) * orbit;
+            const targetZ = -10 + Math.cos(t * 0.42) * orbit * 0.75;
+            const targetY = 7 + Math.sin(t * 1.1) * 2.2;
+            // Wind-up: rear back and face the truck before the charge
+            if (serpentLungeT.current > -0.55 && serpentLungeT.current < 0) {
+              const awayX = head.x - px.current;
+              const awayZ = head.z - pz.current;
+              const al = Math.hypot(awayX, awayZ) || 1;
+              head.x += (awayX / al) * 12 * clamped;
+              head.z += (awayZ / al) * 12 * clamped;
+              head.y += 6 * clamped;
+            } else {
+              head.x += (targetX - head.x) * 1.4 * clamped;
+              head.z += (targetZ - head.z) * 1.4 * clamped;
+              head.y += (targetY - head.y) * 1.8 * clamped;
+            }
+          }
+
+          // Soft arena clamp so a miss doesn't leave the map
+          const hr = Math.hypot(head.x, head.z);
+          if (hr > ARENA_R - 6) {
+            const s = (ARENA_R - 6) / hr;
+            head.x *= s;
+            head.z *= s;
+          }
+
           for (let i = 1; i < segs.length; i++) {
             const prev = segs[i - 1]!;
             const cur = segs[i]!;
@@ -1050,21 +1127,17 @@ export function BossWave({ color }: { color: string }) {
             const dy = prev.y - cur.y;
             const dz = prev.z - cur.z;
             const d = Math.hypot(dx, dy, dz) || 1;
-            const want = 1.05;
-            cur.x = prev.x - (dx / d) * want;
-            cur.y = prev.y - (dy / d) * want;
-            cur.z = prev.z - (dz / d) * want;
-          }
-          if (Math.hypot(px.current - head.x, pz.current - head.z) < 2.4 && Math.abs(py.current - head.y) < 2.2) {
-            hurt(1);
+            cur.x = prev.x - (dx / d) * segGap;
+            cur.y = prev.y - (dy / d) * segGap;
+            cur.z = prev.z - (dz / d) * segGap;
           }
         }
-        if (bossCd.current <= 0) {
+        if (bossCd.current <= 0 && serpentLungeT.current <= 0) {
           const head = serpentSegs.current[0] ?? bc;
-          fireBossShot(head, true, "#e040fb", 18, 1);
+          fireBossShot(head, true, "#e040fb", 22, 1);
           if (bossPhase.current % 3 === 0) {
-            fireBossShot(head, true, "#80d8ff", 20, 1);
-            fireBossShot(head, false, "#ff80ab", 14, 1);
+            fireBossShot(head, true, "#80d8ff", 24, 1);
+            fireBossShot(head, false, "#ff80ab", 16, 1);
           }
           bossCd.current = Math.max(0.45, 1.0 - waveIdxRef.current * 0.04);
           bossPhase.current += 1;
@@ -1095,7 +1168,7 @@ export function BossWave({ color }: { color: string }) {
         }
         if (bossKind.current === "serpent") {
           for (const seg of serpentSegs.current) {
-            if (Math.hypot(b.x - seg.x, b.y - seg.y, b.z - seg.z) < 1.35) {
+            if (Math.hypot(b.x - seg.x, b.y - seg.y, b.z - seg.z) < 1.35 * BOSS_SCALE) {
               damageBoss(b.dmg);
               b.life = -1;
               break;
@@ -1390,10 +1463,16 @@ export function BossWave({ color }: { color: string }) {
               </mesh>
               {isHead && (
                 <>
-                  <mesh position={[0, 0.85, 0.2]} rotation={[0.4, 0, 0]}>
-                    <coneGeometry args={[0.18, 1.1, 6]} />
-                    <meshStandardMaterial color="#fff8e1" emissive="#ffe082" emissiveIntensity={1.6} metalness={0.7} />
+                  {/* Unicorn horn — ~4× the old stub so it reads as a weapon */}
+                  <mesh position={[0, 2.35, 0.55]} rotation={[0.55, 0, 0]}>
+                    <coneGeometry args={[0.72, 4.4, 8]} />
+                    <meshStandardMaterial color="#fff8e1" emissive="#ffe082" emissiveIntensity={1.85} metalness={0.75} roughness={0.22} />
                   </mesh>
+                  <mesh position={[0, 0.55, 0.15]} rotation={[0.55, 0, 0]}>
+                    <cylinderGeometry args={[0.55, 0.7, 0.55, 8]} />
+                    <meshStandardMaterial color="#ffe082" emissive="#ffd54f" emissiveIntensity={1.1} metalness={0.6} />
+                  </mesh>
+                  <pointLight position={[0, 3.2, 1.2]} color="#ffe082" intensity={22} distance={28} />
                   <mesh position={[-0.35, 0.25, 0.85]}>
                     <sphereGeometry args={[0.18, 8, 8]} />
                     <meshStandardMaterial color="#120018" emissive="#e040fb" emissiveIntensity={1.5} />

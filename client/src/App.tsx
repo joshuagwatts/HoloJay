@@ -67,6 +67,10 @@ export function App() {
       if (enter && gameById(enter)) sessionStorage.setItem("holojay.enter", enter);
       if (params.get("skyRadar") === "1") sessionStorage.setItem("holojay.skyRadar", "1");
       if (params.get("skyIntro") === "1") sessionStorage.setItem("holojay.skyIntro", "1");
+      const bossKind = params.get("bossKind");
+      if (bossKind === "serpent" || bossKind === "skull" || bossKind === "slime") {
+        sessionStorage.setItem("holojay.bossKind", bossKind);
+      }
     } catch {
       /* ignore */
     }
